@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Tic tac Toe </title>
+</head>
+<body></body>
+<script src="iio-sdk/iioEngine-1.2.1.min.js"></script>
+<script>
+var TicTacToe = function(io){
+	var grid = io.addObj(new iio.ioGrid(0,0,3,3,150).setStrokeStyle('white',4));
+	var xTrun = true;
+
+	io.setBGColor('black');
+	io.canvas.addEventListener('mousedown',function(event){
+		var cell = grid.getCellAt(io.getEventPosition(event),true);
+
+		if(typeof grid.cells[cell.x][cell.y].taken == 'undefined'){
+
+			var cellCenter = grid.getCellCenter(cell);
+			//var cellCenter = grid.getCellCenter(io.getEventPosition(event),true);
+			if(xTrun){
+				io.addObj(new iio.ioX(cellCenter, 100).setStrokeStyle('red',4));
+			}else{
+				io.addObj(new iio.ioCircle(cellCenter,50).setStrokeStyle('green',4));
+			}
+		
+			xTrun = !xTrun;
+			grid.cells[cell.x][cell.y].taken = true;
+		}
+
+		
+		
+	});
+
+}; iio.start(TicTacToe);
+	
+</script>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title> Hello iio </title>
+</head>
+<body>
+	
+</body>
+<script src="iio-sdk/iioEngine-1.2.1.min.js"></script>
+<script>
+var Helloiio = function(io){
+	//我去，字体大小颜色必须设定没有默认
+	io.addObj(new iio.ioText('Hello iio!!', io.canvas.center)
+		.setFont('30px Consolas')
+		.setTextAlign('center')
+		.setFillStyle('black'));
+
+}; iio.start(Helloiio);
+
+
+</script>
+
+</html>

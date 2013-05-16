@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>scroll Shooter</title>
+</head>
+<body>
+<script src="iio-sdk/iioEngine-1.2.1.min.js"></script>
+<script src="iio-sdk/iioDebugger-1.0.js"></script>
+<script>
+var SpaceShooter = function(io){
+	io.activateDebugger();
+
+	io.setBGColor('#5e3f6b');
+	var LEFT = 0;
+	var RIGHT = 1;
+	var UP = 2;
+	var DOWN = 3;
+	var SPACE = 4;
+	var input = [];
+
+	var bgSpeed = 6;
+	var bgDensity = io.canvas.width/20; //根据整个屏幕的大小来决定画多少个背景对象
+	var bgImgs = [];
+	var bgImgsSrc = ['images/Background/starSmall.png',
+					 'images/Background/starBig.png',
+					 'images/Background/nebula.png' ];
+	var playerSrc = ['images/playerLeft.png','images/player.png','images/playerRight.png'];
+	var laserImgSrc = ['images/laserRed.png','images/laserRedShot.png'];
+	var meteorImgSrc = ['images/meteorBig.png','images/meteorSmall.png'];
+	
+
+	/**************  	 background  	***************/
+	var moveToTop = function(obj){
+		obj.setPos(iio.getRandomInt(10,io.canvas.width-10),iio.getRandomInt(-340,-100));
+		return true;
+	}
+
+	for(var i = 0; i<bgImgsSrc.length; i++){
+		bgImgs[i] = new Image();
+		bgImgs[i].src = bgImgsSrc[i];
+		//onload有'延迟'，用bind或闭包解决问题。下面用bind的做法
+		bgImgs[i].onload = function(){
+			var tag,zIndex,vel;
+			//this也可以是个数据类型,但会被bind函数转回数据对象Number，
+			//而在switch里面判断是===的，所以记得要转回数据类型
+			//var index = this.valueOf();//or parseInt
+			switch(this[0]){
+				case 0: tag = 'small starts';
+						zIndex = -20;
+						vel = bgSpeed;
+						break;
+				case 1: tag = 'big stars';
+						zIndex = -15;
+						vel = bgSpeed + 2;
+						break;
+				case 2: tag = 'nebula';
+						zIndex = -5;
+						vel = bgSpeed + 4;
+						break;
+			}
+
+			for(var j = 0; j<bgDensity; j++){
+				if(iio.getRandomNum() <.4){
+					var rect = new iio.ioRect(iio.getRandomInt(10,io.canvas.width-10),
+									   iio.getRandomInt(0,io.canvas.height));
+					rect.createWithImage(bgImgs[this[0]]);
+					rect.enableKinematics();
+					rect.setVel(0,vel);
+					rect.setBound('bottom',io.canvas.height+140,moveToTop);
+
+					io.addToGroup(tag, rect, zIndex);
+				}
+			}
+		}.bind([i]); //绑定onload函数里面的this对象是一个装有i的数组
+
+	}
+
+	/**************  	 player  	***************/
+	var playerSpeed = 8;
+	var player = new iio.ioRect(io.canvas.center.x,io.canvas.height-100);
+	//the last parameter allows us to specify which src image to start (0 is default)
+	player.createWithAnim(playerSrc,0);
+	//之前我们绘制静态对象（星星）的时候addToGroup要在onload里面，是为了确保渲染，
+	//现在我们会1秒60帧的重绘，可以放心不用考虑图片加载前后
+	io.addToGroup('player',player);
+
+	var updatePlayer = function(){
+		//update position
+		if(input[LEFT] && ! input[RIGHT] && player.pos.x - player.width/2 > 0){
+			player.translate(-playerSpeed,0);
+		}
+		if(input[RIGHT] && ! input[LEFT] && player.pos.x + player.width/2 < io.canvas.width){
+			player.translate(playerSpeed,0);
+		}
+		if(input[UP] && ! input[DOWN] && player.pos.y - player.height/2 > 0){
+			player.translate(0,-playerSpeed+1);
+		}
+		if(input[DOWN] && ! input[UP] && player.pos.y + player.height/2 < io.canvas.height){
+			player.translate(0,playerSpeed-1);
+		}
+		if(input[SPACE] && laserTimer < 0){
+			fireLaser(player.left() +10, player.pos.y);
+			fireLaser(player.right() -8, player.pos.y);
+			laserTimer = laserCooldown;
+		}else{
+			laserTimer -= 3;
+		}
+
+		//update ship image
+	    if (input[LEFT] && !input[RIGHT])
+	        player.setAnimFrame(0);
+	    else if (input[RIGHT] && !input[LEFT])
+	        player.setAnimFrame(2);
+	    else player.setAnimFrame(1);
+	}
+
+	/**************  	 laser  	***************/
+
+	var laserCooldown = 20;
+	var laserTimer = 0;
+
+	var laserImg = new Image(),laserFlashImg = new Image();
+	laserImg.src = laserImgSrc[0];
+	laserFlashImg.src = laserImgSrc[1];
+
+	var fireLaser = function(x,y){
+		var fireRect = new iio.ioRect(x,y).createWithImage(laserImg)
+									  .enableKinematics()
+									  .setBound('top',-40)
+									  .setVel(0,-16);
+
+		io.addToGroup('lasers',fireRect,-1)
+	}
+
+	/**************  	 meteor  	***************/
+
+	var meteorDensity = Math.round(io.canvas.width/150);
+	var smallToBig = .7;	//this will make 70% of all meteors small
+
+	var bigMeteorImg = new Image(), smallMeteorImg = new Image();
+	bigMeteorImg.src = meteorImgSrc[0];
+	smallMeteorImg.src = meteorImgSrc[1];
+
+	var createMeteor = function(x,y,small){
+
+		var img = small ? smallMeteorImg : bigMeteorImg;
+		var meteor = new iio.ioRect(x,y).createWithImage(img)
+										.enableKinematics()
+										.setBound('bottom', io.canvas.height + 120)
+										.setVel(iio.getRandomInt(-2,2),iio.getRandomInt(10,14))
+										//力矩用于对物体进行旋转的速度
+										.setTorque(iio.getRandomNum(-0.1,0.1));	
+		if(!small) meteor.health = 5;								
+		io.addToGroup('meteors',meteor,-1);
+	}
+
+	/*******************	iio引擎的碰撞检测	************************/
+	//确保在没有生成激光和陨石之前就生成group组，不然setCollision就会报错
+	io.addGroup('lasers');
+	io.addGroup('meteors');
+	io.setCollisionCallback('lasers','meteors',function(laser,meteor){
+		var flashRect = new iio.ioRect( (laser.pos.x+meteor.pos.x)/2, (laser.pos.y+meteor.pos.y)/2 )
+									  .createWithImage(laserFlashImg)
+									  .enableKinematics()
+									  .setVel(meteor.vel.x,meteor.vel.y)
+									  .shrink(.1); //不断收缩直到看不见，填的值为收缩速度
+		io.addToGroup('laser flashes',flashRect,10);
+
+		if(typeof(meteor.health) != 'undefined'){
+			meteor.health--;
+			if(meteor.health ==0){
+				var numFragments = iio.getRandomInt(3,6);
+				for(var i = 0; i<numFragments; i++){
+					createMeteor(meteor.pos.x+iio.getRandomInt(-20,20), 
+								 meteor.pos.y+iio.getRandomInt(-20,20), true);
+				}
+				io.rmvFromGroup(meteor,'meteors');
+			}
+
+		} else io.rmvFromGroup(meteor,'meteors');
+
+		io.rmvFromGroup(laser,'lasers');
+		
+	});
+
+
+	/********************	 	input 		********************/
+
+	//If the key is down, the value of its switch will be true, otherwise, it will be false or 'undefined'.
+	var updateInput = function(event, boolValue){
+		if(iio.keyCodeIs('left arrow', event)){
+			input[LEFT] = boolValue;
+		}
+		if(iio.keyCodeIs('right arrow', event)){
+			input[RIGHT] = boolValue;
+		}
+		if(iio.keyCodeIs('up arrow', event)){
+			input[UP] = boolValue;
+		}
+		if(iio.keyCodeIs('down arrow', event)){
+			input[DOWN] = boolValue;
+		}
+		if(iio.keyCodeIs('space',event)){
+			input[SPACE] = boolValue;
+		}
+	}
+	window.addEventListener('keydown',function(event){
+		updateInput(event,true);
+	});
+	window.addEventListener('keyup',function(event){
+		updateInput(event,false);
+	});
+
+	/********************	 	step 		**********************/
+
+	//一个更稳健的方式来处理输入,应用运行在恒定帧速率,是创建一个数组的输入开关
+	io.setFramerate(60,function(){
+		//不是用ioAppManager提供给我们kinematic和bound边界检测 我们自己控制player的运动
+		updatePlayer();
+
+		//create meteors 2% of the time
+		if(iio.getRandomNum() < .02 ){
+			for(var i = 0; i<meteorDensity; i++){
+				var x = iio.getRandomInt(30, io.canvas.width-30);
+				var y = iio.getRandomInt(-800,-50);
+				if(iio.getRandomNum() < smallToBig)
+					createMeteor(x,y,true);
+				else createMeteor(x,y);
+			}
+		}
+
+	});	
+
+}; iio.start(SpaceShooter);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>skeleton 8 Doll Demo</title>
+</head>
+<body></body>
+
+<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+<script >
+
+
+var sphereX = 0;	//鼠标的x
+var sphereY = 0; //鼠标的y
+var sphere;	//鼠标控制器
+var sphereWidth = 50;
+
+var dot = function(x,y,ctx){
+	ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+//鼠标控制器
+var sphereHandler = function(io){
+	var mCircle = io.addObj(new iio.ioCircle(io.canvas.center.x,io.canvas.center.y+80,50)
+	                        .setFillStyle('00BAFF')
+	                        .setAlpha(.7),999);
+	//handle mouse move
+     io.canvas.addEventListener('mousemove', function(event){
+		 //注意如果你只有小量obj更新，更高效的方式是重绘自身而不是整个canvas重绘
+		 //但是我们把obj交给ioAppManager管理，不需要我们自己clearSelf和draw
+		 //下面这种写法只会变成两种重绘机制
+		 //mCircle.clearSleft(io.context);
+		 //mCircle.draw(io.context);
+		 sphereX = (event.x || event.clientX);
+		 sphereY = (event.y || event.clientY);
+		 mCircle.setPos(io.getEventPosition(event));
+     });
+}
+
+function Point(doll){
+	this.x =  doll.x+Math.random(); //初始位置x
+	this.y =  doll.y+Math.random(); //初始位置y
+	this.xb = this.x;	//原速度x
+	this.yb = this.y + 2;	//原速度y
+	this.w = 0;  //取link中最长的with？现在可以理解为碰撞宽度
+	this.stiffness = doll.stiffness;
+	//该节点上的关节连接,初始化在Link初始化方法中
+	this.links = [];
+
+	/**
+	* 理解：this.w为什么要取节点中的link最长的width
+	* 原因：因为hongru的这种物理碰撞是伪碰撞(hongru喜欢搞伪XX伪3D,不过真厉害，简化了很多)
+	* 如果我们设置w为0,就会发现物理碰撞其实是跟节点碰撞，w的大小为碰撞的区域，所以
+	* w取所以link中的最长的宽度，实际是一种折中方案
+	*/
+
+	this.anim = function(){
+		/* ==== calculates links angles ==== */
+		for (var i = 0, link; link = this.links[i++]; link.trigo());
+
+		/* ==== inertia + stiffness ==== */
+		// var vx  = (this.x - this.xb) * this.stiffness; //惯性速度x
+		// var vy  = (this.y - this.yb) * this.stiffness; //惯性速度y
+		// this.xb = this.x;	//原速度x
+		// this.yb = this.y;	//原速度y
+		// this.x += vx;
+		// this.y += vy;
+		/* ==== mouse collision ==== */
+		var dx = this.x - sphereX;
+		var dy = this.y - sphereY;
+		var d  = Math.sqrt(dx * dx + dy * dy);
+		var w  = (sphereWidth + this.w) * .5;
+		if (d < w) {
+			d = Math.abs(w - d);
+			a = Math.atan2(dy, dx);
+			this.x += d * Math.cos(a);
+			this.y += d * Math.sin(a);
+		}
+		/* ==== screen limits ==== */
+		if (this.y < 0) {
+			this.y  = 0;
+			this.yb = -5;
+		}else if (this.y > canvas.height) {
+			this.y  = canvas.height;
+			this.yb = canvas.height + 5;
+		}
+		if (this.x < 0) {
+			this.x  = 0;
+			this.xb = -5;
+		}else if (this.x > canvas.width) {
+			this.x  = canvas.width;
+			this.xb = canvas.width + 5;
+		}
+
+		//dot(this.x,this.y,ctx);
+	}
+}
+
+function Link(doll,point0,point1,imgsrc,zIndex,width,height){
+
+	//link的x,y有trigo方法计算得出，width，height按比例值计算
+	//先来理解长宽的问题。
+
+	this.width = width*20;	//20为比个比例值，可以根据响应式计算这个比例值来调整doll的大小
+	this.height = height*20;  
+
+	this.point0 = point0;
+	this.point1 = point1;
+	//point0为父节点
+	point0.links.push(this);
+	//目前我们使用with作为绘画的height，所以这样，暂时理解为这样
+	if(point0.w < this.height) point0.w =  this.height;
+	if(point1.w < this.height) point1.w =  this.height;
+
+	//init image
+	var img = new Image();
+	var _this = this;
+	img.onload = function(){
+		//this for img
+		//_this.width = this.width;
+		//_this.height = this.height;
+		this.loaded = true;
+	}
+	img.src = imgsrc;
+	this.img = img
+
+
+	/*
+	* 程序核心算法理解：
+	* 
+	* 首先这份方法的功能是：重新计算关节(节点)的角度，长度
+	* 严谨的做法当然是使用反向动力学，但视乎理解了hongru代码后，发现又是一个巧妙的伪反动力学
+	* 	程序一开始奇怪的地方就是骨骼link的长宽是按一个比例计算，关节point的位置x,y居然是随机
+	* 而且好像并没有设置关节和骨骼的位置，最后奇怪的是在link的draw方法里面的宽高，绘制的宽高
+	* 居然不是this.width，this.heigh。原因一切都源于我之前写的skeleton1~6 Demo的原因。
+	* 	很明显我是以之前骨骼逻辑的固定思考模式来理解这篇代码的。	
+	* 之前的Demo原理是：确认好骨骼及依附在骨骼上的关节，骨骼运动带动关节，子骨碌根据关节位置
+	* 而这个doll Demo的骨骼原理是：
+	*   骨骼关键元素是：关节point，而不是骨骼link。
+	*   d:     为两个关节point的距离。
+	*   d0:    核心元素。根据link.height和d之间差乘上比例值
+	*	dx,dy: 根据d0按相似比计算得出关节point的移动距离  
+	*	rx,ry: 目前不知道有何用，取0对程序没有影响
+	*	
+	* 一开始point的位置没有所谓，trigo方法，会使用关节的高度link.height的比值重新计算两个
+	* 关节point的距离(按照height)，来调整point的位置。当多次计算结果后d会趋向于0.即是 
+	* d == link.height 这就是为什么开始point的位置可以随机的原因。
+	* 
+	* 根据前面的理解，伪骨骼碰撞本质是关节碰撞。我们使用sphere(鼠标控制器)去压骨骼link的时候
+	* 我们可以发现骨骼可以弹性伸长，非常牛逼。理解了本质后，我们可以揭露是：
+	* 我们link的draw方法中的高度绘制是根据d+link.with*.3(link.with*3)下面注释有解析
+	* 就是说骨骼的高度其实是关节point的距离决定的，那么我们碰撞关节，两关节距离d变大，我们就
+	* 看到骨骼“被压扁变长了”。而point的位置会不断依据link.height调节，最后"弹回来"
+	*/
+	/* ==== calculates links' angles and length ==== */
+	this.trigo = function () {
+		/* ==== angle ====*/
+		//刚初始化时候所有point都在同个位置波动(所有point的x，y相差不到1，
+		//但绝不能point的x，y相等)
+		this.pointDisX   = this.point1.x - this.point0.x;
+		this.pointDisY   = this.point1.y - this.point0.y;
+		this.angle = Math.atan2(this.pointDisY, this.pointDisX);
+		/* ==== Constraints ==== */
+		//if (this.parent) this.constraint();
+		/* ==== inverse kinematics ==== */
+		var d  = Math.sqrt(this.pointDisX * this.pointDisX + this.pointDisY * this.pointDisY);
+		//d0中的0.5为关节的依附粘性硬度。越低粘性越软，越高依附粘性越硬
+		var d0 = (this.height - d) * .5;  
+		var dx = this.pointDisX / d * d0;  // dx/d0 = pointDisX/d  三角形相似比
+		var dy = this.pointDisY / d * d0;
+		//console.log(d0,dx,dy)
+		var rx = .1 * (Math.random() - .5);	//关节活动范围？目前如果rx，ry取0都对程序木有影响
+		var ry = .1 * (Math.random() - .5);
+		this.point0.x -= (dx + rx);
+		this.point0.y -= (dy + ry);
+		this.point1.x += (dx + rx);
+		this.point1.y += (dy + ry);
+		/* ==== saves point for rendering ==== */
+		this.x = this.point0.x;
+		this.y = this.point0.y;
+		this.d = d;
+	}
+
+	this.draw = function(){
+		dot(this.x,this.y,ctx);
+		var img = this.img;
+		if(img.loaded){
+			ctx.save();
+			ctx.translate(this.x,this.y);
+			ctx.rotate(this.angle);
+			// ctx.drawImage(img,-this.width * .15,-this.width * .5, this.d + this.width * .3, this.width);
+			/**
+			* 在translate x，y后，我们再在draw方法中调整x，y是调整节点的位置
+			* 第一二个参数都为0时候，关节节点是在左上角
+			* 第一个参数理解为左上角偏离垂直的距离（向矩形内部延伸）
+			* 第二个参数理解为左上角偏离水平的距离，取width/2为在宽度一半
+			* 矩形的绘画长宽和我们计算的长宽刚好倒过来了（希望理解计算过程后，能改过来）
+			* this.d为两个节点距离，this.width*.3，为两个节点垂直偏移距离之和this.width*.15*2
+			* 第三个参数（context的绘画width），this.d + this.width*.3 为矩形的高度
+			* 第四个参数（context的绘画height），this.with
+			*/
+			ctx.strokeStyle = 'green';
+			ctx.strokeRect(-this.width*.15,-this.width/2,this.d + this.width * .3,this.width);
+
+			ctx.restore();
+		}
+	}
+
+
+}
+var Doll = iio.inherit(function(x,y,structure,stiffness){
+	this.x = x;
+	this.y = y;
+
+	this.stiffness = stiffness;
+	this.points = [];
+	this.links = [];
+	//inheirt method call
+	iio.ioObj.call(this,x,y);
+
+	for(var l in structure){
+		var link = structure[l],
+			p0 = link[0],
+			p1 = link[1];
+
+		if(!this.points[p0])
+			this.points[p0] = new Point(this);
+		if(!this.points[p1])
+			this.points[p1] = new Point(this);
+
+		this.links.push(new Link(this,this.points[p0],this.points[p1],link[2],link[3],link[4],link[5]) );
+
+	}
+
+	this.draw = function(ctx){
+		for(var i = 0,point; point = this.points[i++]; point.anim());
+		for(var i = 0,link; link = this.links[i++]; link.draw());
+	}
+},iio.ioObj);
+
+
+var doll;
+var ctx,canvas;
+var imgPath = 'images/doll/';
+var imgSrcs = {
+	head: imgPath + 'head.png',
+	body: imgPath + 'body.png',
+	leg: imgPath + 'leg.png',
+	calf: imgPath + 'calf.png'
+}
+var structure = {
+	//	  p0, p1,  img,			 zIndex, contraints, aMin, aMax
+	// body:[ 0, 1,   imgSrcs.body,   7,   null, 		null, null],
+	// head:[ 0, 10,  imgSrcs.head,   6,   'body',    -1.5,  2],
+	// leg: [ 1, 2,   imgSrcs.leg,    3,   'body', 	2.5,  1.2],
+	// calf:[ 2, 3,   imgSrcs.calf,   4,   'leg', 		0.3,  2.5]
+	body:[ 0, 1,   imgSrcs.body,   7,   5,9,  null, 		null, null],
+	head:[ 0, 4,   imgSrcs.head,   6,   4.5,4,'body',    -1.5,  2],
+	leg: [ 1, 2,   imgSrcs.leg,    3,   3.5,6,'body', 	2.5,  1.2],
+	calf:[ 2, 3,   imgSrcs.calf,   4,   5,7,  'leg', 		0.3,  2.5]
+
+}
+
+var skeletonApp = function(io){
+	io.setBGColor('#ddd');
+	ctx = io.context;
+	canvas = io.canvas;
+
+	sphereHandler(io);
+	doll = new Doll(200,200,structure,0.998);
+	io.addObj(doll);
+	io.setFramerate(60,function(){
+		io.draw();
+	});
+
+}
+
+;iio.start(skeletonApp);
+
+
+</script>
+</html>

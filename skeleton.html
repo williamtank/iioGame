@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>skeleton 1</title>
+</head>
+<body>
+</body>
+<script src="iio-sdk/iioEngine-1.2.1.js"></script>
+<script >
+var bone1,bone2; //扔到全局，方便用chrome debug
+var skeletonApp1 = function(io){
+	var Bone = iio.inherit(function(x,y,width,height){
+		this.joints = {};
+		this.rotation = 0;	//默认角度为0
+		iio.ioRect.call(this,x,y,width,height);
+		//iio.ioRect.apply(this, arguments);
+	},iio.ioRect);
+	//关节的x,y是相对于骨头的pos(就是骨头的pos)
+	Bone.prototype.setJoint = function(name,x,y){
+		if(!this.joints) this.joints = {};
+		var obj = new iio.ioCircle(x,y,4).setStrokeStyle('green',2);
+		obj.x = x;
+		obj.y = y;
+		this.joints[name] = obj;
+	}
+	Bone.prototype.getJoint = function(name){
+		return this.joints[name];
+	}
+	Bone.prototype.getJointAbsPos = function(name){
+		if(this.joints[name]){
+			var targetJoint = this.joints[name],
+				fixedJoint = this.joints['fixed'];
+			var dis = Math.sqrt( Math.pow(fixedJoint.x-targetJoint.x,2)
+					 + Math.pow(fixedJoint.y-targetJoint.y,2) ,2);
+
+			var xPos = this.pos.x + (Math.cos(this.rotation) * dis)/2;
+			var yPos = this.pos.y + (Math.sin(this.rotation) * dis)/2;
+			return {x: xPos, y: yPos}
+		}
+	}
+	Bone.prototype.setPosByJoint = function(bone,name){
+		if(bone instanceof Bone && bone.joints[name]){
+			var jointAbsPos = bone.getJointAbsPos(name);
+			var thisFixed = this.joints['fixed'];
+			var boneFixed = bone.joints['fixed'];
+
+			this.pos.x = jointAbsPos.x - (thisFixed.x-boneFixed.x) - thisFixed.x;
+			this.pos.y = jointAbsPos.y - (thisFixed.y-boneFixed.y) - thisFixed.y;
+		}
+	}
+
+	Bone.prototype.draw = function(ctx,pos,r){
+		//如果使用this，这是this是具体实例对象，非原型构造对象
+		//this.constructor.parent.prototype.draw.apply(this,arguments);
+		Bone.parent.prototype.draw.apply(this,arguments);
+
+		//画出自身的关节点
+		for(var i in this.joints){
+			var joint = this.joints[i];
+			joint.clearSelf(ctx);
+			var posX = this.pos.x + joint.x*Math.cos(this.rotation);
+			var posY = this.pos.y + joint.x*Math.sin(this.rotation);
+			joint.pos.x = posX;
+			joint.pos.y = posY;
+			joint.draw(ctx);
+		}
+	}
+
+	bone1 = new Bone(250,150,200,30,45).setStrokeStyle('#000');
+	bone1.rotation = 0;
+	bone1.setJoint('fixed',-80,0);
+	bone1.setJoint('leg',80,0);
+	//io.addObj(bone1); //不需要交给ioAppManager，因为重绘都由自己处理了
+
+	//副骨头的位置因粘附的关节的位置而调整，则new的时候pos可以随便设置
+	bone2 = new Bone(0,0,200,30).setStrokeStyle('#000');
+	bone2.setJoint('fixed',-80,0);
+	bone2.setPosByJoint(bone1,'leg');	//根据粘附的关节而设置它的位置
+	//io.addObj(bone2);
+
+	var cycle = 0,angle;
+	io.setFramerate(60,function(){
+		//注意这些次序,先clean在调角度，再画
+		cycle+=0.06;
+		angle = Math.sin(cycle)*Math.PI/2;
+
+		//bone1.clearSelf(io.context);
+		//bone2.clearSelf(io.context);
+		io.context.clearRect(0,0,io.canvas.width,io.canvas.height);
+		bone1.rotation = angle;
+		bone2.setPosByJoint(bone1,'leg');
+		//bone2.rotation = bone1.rotation + angle;
+		bone1.draw(io.context);
+		bone2.draw(io.context);
+		
+	});
+
+}; iio.start(skeletonApp1);
+
+</script>
+</html>

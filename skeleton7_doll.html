@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>skeleton 7 Doll Demo</title>
+	<style>
+	.range{
+		display: inline-block;
+		width: 140px;
+	}
+	.range p{
+		display: inline-block;
+		width: 100%;
+		padding: 0;
+		margin: 0;
+		text-align: left;
+		font-family: '微软雅黑';
+		color: #bbb;
+		position: relative;
+		top: -15px;
+		z-index: -1;
+	}
+	</style>
+</head>
+<body>
+<!-- 	<div id="controller">
+	<div class="range">
+		<input type="range" id="speedRange" max="0.1" min="0.01" step="0.01" value="0.05">
+		<p>Speed</p>
+	</div>
+	<div class="range">
+		<input type="range" id="thighRange" max="90" min="0" step="1" value="45">
+		<p>Thigh</p>
+	</div>
+	<div class="range">
+		<input type="range" id="calfRange" max="90" min="0" step="1" value="45">
+		<p>Calf</p>
+	</div>
+	<div class="range">
+		<input type="range" id="thighBase" max="180" min="0" step="1" value="90">
+		<p>ThighBase</p>
+	</div>
+	<div class="range">
+		<input type="range" id="calfOffset" max="180" min="-180" step="1" value="-90">
+		<p>CalfOffset</p>
+	</div>	
+</div> -->
+</body>
+
+<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+<script >
+
+var dolls = [];
+
+var nx = 0; //canvas 的left
+var ny = 0; //canvas 的top
+var nw = 0;	//canvas 的offset width
+var nh = 0; //canvas 的offset height
+
+var sphereX = 0;	//鼠标的x
+var sphereY = 0; //鼠标的y
+var sphere;	//鼠标控制器
+var sphereWidth = 50;
+
+var dot = function(x,y,ctx){
+	ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+
+//鼠标控制器
+var sphereHandler = function(io){
+	var mCircle = io.addObj(new iio.ioCircle(io.canvas.center.x,io.canvas.center.y+80,50)
+	                        .setFillStyle('00BAFF')
+	                        .setAlpha(.7),999);
+	//handle mouse move
+     io.canvas.addEventListener('mousemove', function(event){
+		 //注意如果你只有小量obj更新，更高效的方式是重绘自身而不是整个canvas重绘
+		 //但是我们把obj交给ioAppManager管理，不需要我们自己clearSelf和draw
+		 //下面这种写法只会变成两种重绘机制
+		 //mCircle.clearSleft(io.context);
+		 //mCircle.draw(io.context);
+		 sphereX = (event.x || event.clientX);
+		 sphereY = (event.y || event.clientY);
+		 mCircle.setPos(io.getEventPosition(event));
+     });
+}
+
+function Point(doll){
+	this.x = doll.x + Math.random(); //?
+	this.y = 20 + Math.random(); //?
+	this.xb = this.x;	//?
+	this.yb = this.y + 2;	//?
+	this.w = 200; //取link中最长的with？
+	this.stiffness = doll.stiffness;
+	//该节点上的关节连接,初始化在Link初始化方法中
+	this.links = [];
+
+	this.anim = function(){
+		/* ==== calculates links angles ==== */
+		for (var i = 0, link; link = this.links[i++]; link.trigo());
+
+		/* ==== inertia + stiffness ==== */
+		var vx  = (this.x - this.xb) * this.stiffness; //惯性速度x
+		var vy  = (this.y - this.yb) * this.stiffness; //惯性速度y
+		this.xb = this.x;	//原速度x
+		this.yb = this.y;	//原速度y
+		this.x += vx;
+		this.y += vy;
+		/* ==== mouse collision ==== */
+		var dx = this.x - (sphereX - nx);
+		var dy = this.y - (sphereY - ny);
+		var d  = Math.sqrt(dx * dx + dy * dy);
+		var w  = (sphereWidth + this.w) * .5;
+		if (d < w) {
+			d = Math.abs(w - d);
+			a = Math.atan2(dy, dx);
+			this.x += d * Math.cos(a);
+			this.y += d * Math.sin(a);
+		}
+		/* ==== screen limits ==== */
+		if (this.y < 0) {
+			this.y  = 0;
+			this.yb = -5;
+		}else if (this.y > canvas.height) {
+			this.y  = canvas.height;
+			this.yb = canvas.height + 5;
+		}
+		if (this.x < 0) {
+			this.x  = 0;
+			this.xb = -5;
+		}else if (this.x > canvas.width) {
+			this.x  = canvas.width;
+			this.xb = canvas.width + 5;
+		}
+	}
+}
+
+function Link(doll,point0,point1,imgsrc,zIndex,width,height){
+	this.point0 = point0;
+	this.point1 = point1;
+	//point0为父节点
+	point0.links.push(this);
+	//link的x,y有trigo方法计算得出,with,height由图片资源
+	this.width = width*20;	//20为比个比例值，可以根据响应式计算这个比例值来调整doll的大小
+	this.height = height*20;  
+
+	//init image
+	var img = new Image();
+	var _this = this;
+	img.onload = function(){
+		//this for img
+		//_this.width = this.width;
+		//_this.height = this.height;
+		this.loaded = true;
+	}
+	img.src = imgsrc;
+	this.img = img
+
+	/* ==== calculates links angles ==== */
+	this.trigo = function () {
+		/* ==== angle ====*/
+		this.pointDisX   = this.point1.x - this.point0.x;
+		this.pointDisY   = this.point1.y - this.point0.y;
+		this.angle = Math.atan2(this.pointDisY, this.pointDisX);
+		/* ==== Constraints ==== */
+		//if (this.parent) this.constraint();
+		/* ==== inverse kinematics ==== */
+		var d  = Math.sqrt(this.pointDisX * this.pointDisX + this.pointDisY * this.pointDisY);
+		var d0 = (this.height - d) * .5;
+		var dx = this.pointDisX / d * d0;  // dx/d0 = pointDisX/d  三角形相似比
+		var dy = this.pointDisY / d * d0;
+		var rx = .1 * (Math.random() - .5);	//关节活动范围？
+		var ry = .1 * (Math.random() - .5);
+		this.point0.x -= (dx + rx);
+		this.point0.y -= (dy + ry);
+		this.point1.x += (dx + rx);
+		this.point1.y += (dy + ry);
+		/* ==== saves point for rendering ==== */
+		this.x = this.point0.x;
+		this.y = this.point0.y;
+		this.d = d;
+	}
+
+	this.draw = function(){
+		dot(this.x,this.y,ctx);
+		var img = this.img;
+		if(img.loaded){
+			ctx.save();
+			ctx.translate(this.x,this.y);
+			ctx.rotate(this.angle);
+			// ctx.drawImage(img,-this.width * .15,-this.width * .5, this.d + this.width * .3, this.width);
+			/**
+			* 在translate x，y后，我们再在draw方法中调整x，y是调整节点的位置
+			* 第一二个参数为0，所有节点都是左上角
+			*
+			*/
+			ctx.strokeStyle = 'green';
+			ctx.strokeRect(-this.width*.15,-this.width/2,this.d + this.width * .3,this.width);
+
+			//ctx.strokeStyle = 'black';
+			//ctx.strokeRect(0,0,this.width,this.height);
+
+			ctx.restore();
+		}
+	}
+
+
+}
+var Doll = iio.inherit(function(x,y,structure,stiffness){
+	this.x = x;
+	this.y = y;
+	this.size = 300; //先固定
+
+	this.stiffness = stiffness;
+	this.points = [];
+	this.links = [];
+	//inheirt method call
+	iio.ioObj.call(this,x,y);
+
+	for(var l in structure){
+		var link = structure[l],
+			p0 = link[0],
+			p1 = link[1];
+
+		if(!this.points[p0])
+			this.points[p0] = new Point(this);
+		if(!this.points[p1])
+			this.points[p1] = new Point(this);
+
+		this.links.push(new Link(this,this.points[p0],this.points[p1],link[2],link[3],link[4],link[5]) );
+
+	}
+
+	this.draw = function(ctx){
+		for(var i = 0,point; point = this.points[i++]; point.anim());
+		for(var i = 0,link; link = this.links[i++]; link.draw());
+	}
+},iio.ioObj);
+
+
+var doll;
+var ctx,canvas;
+var imgPath = 'images/doll/';
+var imgSrcs = {
+	head: imgPath + 'head.png',
+	body: imgPath + 'body.png',
+	leg: imgPath + 'leg.png',
+	calf: imgPath + 'calf.png'
+}
+var structure = {
+	//	  p0, p1,  img,			 zIndex, contraints, aMin, aMax
+	// body:[ 0, 1,   imgSrcs.body,   7,   null, 		null, null],
+	// head:[ 0, 10,  imgSrcs.head,   6,   'body',    -1.5,  2],
+	// leg: [ 1, 2,   imgSrcs.leg,    3,   'body', 	2.5,  1.2],
+	// calf:[ 2, 3,   imgSrcs.calf,   4,   'leg', 		0.3,  2.5]
+	body:[ 0, 1,   imgSrcs.body,   7,   5,9,  null, 		null, null],
+	head:[ 0, 4,   imgSrcs.head,   6,   4.5,4,'body',    -1.5,  2],
+	leg: [ 1, 2,   imgSrcs.leg,    3,   3.5,6,'body', 	2.5,  1.2],
+	calf:[ 2, 3,   imgSrcs.calf,   4,   5,7,  'leg', 		0.3,  2.5]
+
+}
+
+var skeletonApp = function(io){
+	io.setBGColor('#ddd');
+	ctx = io.context;
+	canvas = io.canvas;
+
+	sphereHandler(io);
+	doll = new Doll(200,200,structure,0.998);
+	io.addObj(doll);
+	io.setFramerate(60,function(){
+		io.draw();
+	});
+
+}
+
+;iio.start(skeletonApp);
+
+
+</script>
+</html>

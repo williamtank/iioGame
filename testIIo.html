@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Document</title>
+<style>
+	canvas{
+		/* iio引擎的bug 不能用css为canvas设置长宽，不然影响canvas里面的内容*/
+		/* width: 400px;
+		height: 400px;*/
+		border: 2px solid rgb(157, 204, 136);
+		box-shadow: 0 0 10px #bbb;  
+	}
+</style>
+</head>
+<body>
+<canvas id="canvas1" width="400px" height="400px"></canvas>
+<canvas id="canvas2" width="400px" height="400px"></canvas>
+<canvas id="canvas3" width="400px" height="400px"></canvas>
+
+</body>
+<script src="iio-sdk/iioEngine-1.2.2-src.js"></script>
+
+<script>
+
+var app1 = function(io){
+	io.addObj(new iio.ioText('GudongUniversity!!', 20,40)
+		              .setFont('20px Consolas')
+		              .setFillStyle('black'));
+	io.addObj(new iio.ioRect(50,150,60)
+					.setFillStyle('blue')
+					.setStrokeStyle('#ddd'));
+	io.addObj(new iio.ioRect(150,150,60)
+					.setFillStyle('#00baff')
+					.setStrokeStyle('black')
+					.setShadow('rgb(150,150,150)',10,10,4)
+					.enableKinematics()
+					.setTorque(.05));
+	io.addObj(new iio.ioRect(50,250,60)
+					.enableKinematics()
+					.setFillStyle('#00baff')
+					.setVel(5,0)
+					.setBounds(0,io.canvas.width,io.canvas.height,0,function(obj){
+						obj.vel.x = -obj.vel.x ;
+					 	return true;
+					}));
+					// .setBound('left',0,function(obj){
+					// 	obj.vel.x = -obj.vel.x ;
+					// 	return true;
+					// })
+					// .setBound('right',io.canvas.width,function(obj){
+					// 	obj.vel.x = -obj.vel.x ;
+					// 	return true;
+					// }));
+
+	//下面两者createWithImage和addImage都使用callback来确保渲染img的时候img已经加载
+	//使用createWithImage，根据image的大小来设置shape的大小
+	var imgRect = new iio.ioRect(300,150)
+					.createWithImage('images/meteorBig.png',function(){
+						io.addObj(imgRect);
+					}).setImgRotation(-Math.PI/2);
+	//使用addImage，使image的大小适应shape的形状大小
+	var imgSquare = new iio.ioRect(300,50,100,50)
+					.addImage('images/meteorBig.png',function(){
+						io.addObj(imgSquare);
+					});
+	
+
+	//测试zIndex顺序 ,v1.2.2有bug对addObj后面的zIndex有问题
+	io.addObj(new iio.ioRect(50,330,60).setFillStyle('green').setShadow('#000',0,0,10))
+	io.addObj(new iio.ioRect(90,330,60).setFillStyle('blue').setShadow('#000',0,0,10))
+	io.addObj(new iio.ioRect(130,330,60).setFillStyle('red').setShadow('#000',0,0,10))
+
+	io.addObj(new iio.ioRect(250,330,60).setFillStyle('green').setShadow('#000',0,0,10) ,-1);
+	io.addObj(new iio.ioRect(290,330,60).setFillStyle('blue').setShadow('#000',0,0,10) ,2);
+	io.addObj(new iio.ioRect(330,330,60).setFillStyle('red').setShadow('#000',0,0,10) ,0);
+
+	//不使用setFramerate所有物理运动就不会动
+	//全局刷新,区分app2的局部刷新。二者都可以在后面增加回调
+	io.setFramerate(40);
+
+}; iio.start(app1, 'canvas1');
+
+var app2 = function(io){
+	var grid = new iio.ioGrid(0,0,3,3,80);
+	//Most iio Objects have a draw function that ultimately gets called when they render
+	//grid.draw(io.context);
+	//give the grid to the ioAppManager (denoted as io)
+	io.addObj(grid);
+
+	var rect = new iio.ioRect(0,100,50,17).enableKinematics()
+						.setFillStyle('#888');
+	//move to the right 1px per update(那么在一个FPS60的帧率下，1s平移60px)
+	rect.setVel(5,0);
+	//rotate .1 radians every update
+	rect.setTorque(.1);
+
+	io.addObj(new iio.ioRect(150,150,60)
+					.setFillStyle('#00baff')
+					.setStrokeStyle('black')
+					.setShadow('rgb(150,150,150)',10,10,4)
+					.enableKinematics()
+					.setTorque(.05));
+
+	//特定的选择对某些对象进行刷新，而不是全局刷新
+	// 对单一对象刷新回调失败，bug？？
+	// v1.2.1是回调失败，使用1.2.2就木有问题了
+	io.setFramerate(40,rect,io.context,function(){
+		if(rect.pos.x > 400){
+			console.log('AAAAAA');
+			rect.setPos(100,0);
+			rect.setVel(0,2);
+		}
+	});	
+
+}; iio.start(app2,'canvas2');
+
+
+var app3 = function(io){
+	io.setBGColor('#ddd');
+
+	var flySrcs = ['images/fly_normal.png','images/fly_fly.png'];
+	var fly = new iio.ioRect(50,50).createWithAnim(flySrcs,function(){
+		//image onload code
+		//This is a great function to use when you have multiple animating objects that need to animate at different rates
+		io.setAnimFPS(6,fly);
+	});
+	//change the displayed image to the fly_fly one
+	//fly.setAnimIndex(1);
+	//advance to the next anim frame
+	//fly.nextAnimFrame();
+
+	/*******   test inherit  *********/
+
+}; iio.start(app3,'canvas3');
+
+</script>
+
+</html>

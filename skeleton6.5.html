@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>skeleton 6.5</title>
+	<style>
+	.range{
+		display: inline-block;
+		width: 140px;
+	}
+	.range p{
+		display: inline-block;
+		width: 100%;
+		padding: 0;
+		margin: 0;
+		text-align: left;
+		font-family: '微软雅黑';
+		color: #bbb;
+		position: relative;
+		top: -15px;
+		z-index: -1;
+	}
+	</style>
+</head>
+<body>
+	<div id="controller">
+		<div class="range">
+			<input type="range" id="speedRange" max="0.1" min="0.01" step="0.01" value="0.05">
+			<p>Speed</p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighRange" max="90" min="0" step="1" value="45">
+			<p>Thigh</p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfRange" max="90" min="0" step="1" value="45">
+			<p>Calf</p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighBase" max="180" min="0" step="1" value="90">
+			<p>ThighBase</p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfOffset" max="180" min="-180" step="1" value="-90">
+			<p>CalfOffset</p>
+		</div>	
+	</div>
+	<canvas id="skeletonCanvas" width="1024" height="600"></canvas>
+</body>
+
+<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+<script >
+
+/**
+* Bone(width,height)	骨骼位置大部分是依附关节,所以提供长宽就可以
+* Bone(x,y,width,height)
+*/
+
+var Bone = iio.inherit(function(x,y,width,height){
+	//关节集合
+	this.joints = {};
+	//中心旋转角度，为iio处理
+	this.rotation = 0;	
+	//按fixed关节旋转角度
+	this.angle = 0;	    
+
+	//注意这不能使用this._super.call(this);因为这时继承关系还没有继承
+	if(arguments.length == 2){
+		iio.ioRect.call(this,0,0,x,y);
+	}else{
+		iio.ioRect.call(this,x,y,width,height);
+	}
+	//iio.ioRect.apply(this, arguments);
+},iio.ioRect);
+
+//关节的x,y是相对于骨头的pos(就是骨头的pos)
+Bone.prototype.setJoint = function(name,x,y){
+	if(!this.joints) this.joints = {};
+	//pos为关节的绝对位置（因运动而不断重设）
+	this.joints[name] = {x:x,y:y,pos:{x:x,y:y}};
+}
+Bone.prototype.getJoint = function(name){
+	return this.joints[name];
+}
+Bone.prototype.getJointAbsPos = function(name){
+	if(this.joints[name]){
+		var targetJoint = this.joints[name],
+			fixedJoint = this.joints['fixed'];
+		var disX = targetJoint.x - fixedJoint.x;
+		var disY = targetJoint.y - fixedJoint.y;
+
+		var xPos = this.pos.x+ fixedJoint.x + Math.cos(this.angle)*disX - Math.sin(this.angle)*disY;
+		var yPos = this.pos.y+ fixedJoint.y + Math.sin(this.angle)*disX + Math.cos(this.angle)*disY;
+		//同时更新关节的实际位置
+		targetJoint.pos.x = xPos;
+		targetJoint.pos.y = yPos;
+		//dot(xPos,yPos,io.context);
+		return {x: xPos, y: yPos}
+	}
+}
+Bone.prototype.setPosByJoint = function(bone,name){
+	if(bone instanceof Bone && bone.joints[name]){
+		var jointAbsPos = bone.getJointAbsPos(name);
+		var thisFixed = this.joints['fixed'];
+		var boneFixed = bone.joints['fixed'];
+		//把自身的固定关节依附到设定关节中
+		thisFixed.pos.x = jointAbsPos.x;
+		thisFixed.pos.y = jointAbsPos.y;
+		//同时更新自身的位置
+		this.pos.x = jointAbsPos.x - thisFixed.x;
+		this.pos.y = jointAbsPos.y - thisFixed.y;
+
+	}
+}
+Bone.prototype.drawJoints = function(ctx){
+	//重新调整自身关节绘画的位置(不影响实际位置)
+	for(var i in this.joints){
+		var joint = this.joints[i];
+		//关节是依附在骨骼上，那么他的位置是相对于骨骼
+		//它的位置只要计算在骨骼正常位置情况下所在就行了,骨骼旋转或平移会自动相对的了
+		var posX = this.pos.x + joint.x;
+		var posY = this.pos.y + joint.y;
+
+		this.drawJoint(ctx,posX,posY);
+	}
+}
+Bone.prototype.drawJoint = function(ctx,x,y,radius,lineWidth,color){
+	ctx.lineWidth = lineWidth || 2;
+    ctx.strokeStyle = color || 'green';
+    radius = radius || 4;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+Bone.prototype.draw = function(ctx,pos,r){
+	ctx.save();
+
+	var jointPos = this.joints['fixed'].pos; //取出固定关节的实际位置(绝对位置)
+	ctx.translate(jointPos.x, jointPos.y);
+	ctx.rotate(this.angle);
+	ctx.translate(-jointPos.x, -jointPos.y);
+	//如果带有自己的绘制方法，就不使用默认的矩形
+	if(typeof this.redraw == 'function'){
+		this.redraw(ctx);
+	}else{
+		//如果为对象设置了图片渲染，就不使用默认样式
+		if(!this.img){
+			this.setStrokeStyle('#000').setFillStyle('#fff');
+		}
+		this.setStrokeStyle('#aaa')
+		//默认样式,iio没有设置默认样式，不填是不能显示
+		this._super.draw.apply(this,arguments);
+	}
+	
+	//画出关节
+	this.drawJoints(ctx);
+
+	ctx.restore();	
+}
+
+var dot = function(x,y,ctx){
+	ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+
+
+var bone0,bone1;
+var skeletonApp = function(io){
+
+	/**
+	* iio引擎1.2.2和1.2.1有个bug
+	* 1.2.1版的同个zIndex情况下，先addObj的比后addObj的层次低（后add的高）
+	* 1.2.2版的同个zIndex情况下，先addObj的比后addObj的层次高（后add的低）
+	* 并且1.2.2有个bug，默认情况（不填zIndex）会有bug，建议只能填-1或1
+	* 目前我是直接用1.2.1的源码覆盖1.2.2的部分源码，使行为与1.2.1一致但也有可能还有问题
+	*/
+
+	bone0 = new Bone(400,300,120,30).addImage('images/doll/leg.png').setImgSize(120,50);
+	bone0.setJoint('fixed',-50,0);
+	bone0.setJoint('leg',50,0);
+	//io.addToGroup('bodyBack',bone0,-1);
+	io.addObj(bone0,-1);
+
+	bone1 = new Bone(120,30).addImage('images/doll/calf.png').setImgSize(140,75);
+	bone1.setJoint('fixed',-50,0);
+	bone1.setPosByJoint(bone0,'leg');
+	//io.addToGroup('bodyBack',bone1,-1);
+	io.addObj(bone1,-2);
+
+
+	var bone2 = new Bone(400,300,120,30).addImage('images/doll/leg.png').setImgSize(120,50);
+	bone2.setJoint('fixed',-50,0);
+	bone2.setJoint('leg',50,0);
+	bone2.setPosByJoint(bone0,'fixed');
+	//io.addToGroup('bodyFront',bone2,1);
+	io.addObj(bone2,1);
+
+	var bone3 = new Bone(120,20).addImage('images/doll/calf.png').setImgSize(140,75);
+	bone3.setJoint('fixed',-50,0);
+	bone3.setPosByJoint(bone2,'leg');
+	//io.addToGroup('bodyFront',bone3,1);
+	io.addObj(bone3,1);
+
+	//body
+	var body = new Bone(60,150).addImage('images/doll/body.png').setImgSize(170,68)
+							.setImgRotation(Math.PI/2);
+	body.angle = Math.PI/18;
+	body.setJoint('fixed',0,65);
+	body.setJoint('head',0,-65);
+	body.setPosByJoint(bone0,'fixed');
+	//io.addToGroup('body',body);
+	io.addObj(body);
+
+	//arm
+	var arm0 = new Bone(110,26).addImage('images/doll/arm.png').setImgSize(120,40);
+	arm0.setJoint('fixed',-45,0);
+	arm0.setJoint('arm',45,0);
+	arm0.setPosByJoint(body,'head');
+	//io.addToGroup('bodyBack',arm0,-2);
+	io.addObj(arm0,2);
+
+	var arm1 = new Bone(110,20).addImage('images/doll/handR.png').setImgSize(120,40);
+	arm1.setJoint('fixed',-45,0);
+	arm1.setPosByJoint(arm0,'arm');
+	//io.addToGroup('bodyBack',arm1,-2);
+	io.addObj(arm1,2);
+
+	var arm2 = new Bone(110,26).addImage('images/doll/arm.png').setImgSize(120,40);
+	arm2.setJoint('fixed',-45,0);
+	arm2.setJoint('arm',45,0);
+	arm2.setPosByJoint(body,'head');
+	//io.addToGroup('bodyFront',arm2,1);
+	io.addObj(arm2,-1);
+
+	var arm3 = new Bone(110,20).addImage('images/doll/handR.png').setImgSize(120,40);
+	arm3.setJoint('fixed',-45,0);
+	arm3.setPosByJoint(arm2,'arm');
+	//io.addToGroup('bodyFront',arm3,1);
+	io.addObj(arm3,-2);
+
+	//head
+	var head = new Bone(50,70).addImage('images/robot/robot_head.png').setImgSize(100,70).setImgOffset(0,-40);
+	head.setJoint('fixed',0,0);
+	head.setPosByJoint(body,'head');
+	// head.redraw = function(ctx){
+	// 	this.drawJoint(ctx,this.pos.x,this.pos.y-50,30,2,'#555');
+	// };
+	//io.addToGroup('body',head);
+	io.addObj(head,-1);
+
+	console.log(io);
+
+	var els = {};
+	els.speed = document.getElementById('speedRange');
+	els.thigh = document.getElementById('thighRange');
+	els.thighB = document.getElementById('thighBase');
+	els.calf = document.getElementById('calfRange');
+	els.calfO = document.getElementById('calfOffset');
+
+	var walkLeg = function(boneA,boneB,c){
+		var deg = Math.PI/180,
+			thigh = parseFloat(els.thigh.value)*deg,
+			thighB = parseFloat(els.thighB.value)*deg,
+			calf =  parseFloat(els.calf.value)*deg,
+			calfO =  parseFloat(els.calfO.value)*deg;
+
+		var angleA = Math.sin(c)* thigh + thighB;
+		var angleB = Math.sin(c + calfO) * calf + calf;
+					
+		boneA.angle = angleA;
+		boneB.angle = boneA.angle+angleB;
+		boneB.setPosByJoint(boneA,'leg');
+	}
+
+	var walkArm = function(boneA,boneB,c){
+		var deg = Math.PI/180,
+			thigh = parseFloat(els.thigh.value)*deg,
+			thighB = parseFloat(els.thighB.value)*deg,
+			calf =  parseFloat(els.calf.value)*deg,
+			calfO =  parseFloat(els.calfO.value)*deg;
+
+		var angleA = Math.sin(c) * thigh + thighB;
+            angleB = Math.sin(c - calfO) * calf + calf;
+
+		boneA.angle = angleA;
+		boneB.angle = boneA.angle-angleB;
+		boneB.setPosByJoint(boneA,'arm');
+	}
+
+
+	var cycle = 0,ctx;
+	io.setFramerate(60,function(){
+		cycle += parseFloat(els.speed.value);
+
+		var deg = Math.PI/180;
+        body.angle = Math.sin(cycle) * 5*deg;
+        head.angle = Math.sin(cycle) * 10*deg;
+
+
+        /*  下面walk函数里面也有setPosByJoint 要想全身动作整体连贯，最好报所有关键的setPostByJoint都更新一次  */
+        //bone1.setPosByJoint(bone0,'leg');
+        bone2.setPosByJoint(bone0,'fixed');
+        //bone3.setPosByJoint(bone2,'leg');
+        body.setPosByJoint(bone0,'fixed');
+        arm0.setPosByJoint(body,'head');
+        //arm1.setPosByJoint(arm0,'arm');
+        arm2.setPosByJoint(body,'head');
+        //arm3.setPosByJoint(arm2,'arm');
+        head.setPosByJoint(body,'head');
+
+		walkLeg(bone0, bone1, cycle);
+		walkLeg(bone2, bone3, cycle + Math.PI);
+		walkArm(arm0, arm1,cycle);
+		walkArm(arm2, arm3, cycle + Math.PI);
+		
+
+		//现在我们把我们的骨骼对象都交给ioAppManager，但是我们的Bone对象都没有设定enableKinematics方法
+		//注意即使设定了enableKinematics方法而没有setVel，ioAppManager都不会把对象不断重绘的。
+		//所以我们在setFramerrate里面强制告诉ioAppManager，我们需要重绘
+		io.draw();
+
+	});
+
+
+}
+
+;(function(){
+
+	iio.start(skeletonApp,"skeletonCanvas");
+})();
+
+
+
+</script>
+</html>
