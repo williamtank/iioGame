@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="cn">
+<head>
+	<meta charset="UTF-8">
+	<title>Rockman L</title>
+	<!--  注意js的引入顺序，有依赖关系的  -->
+	<script src="js/Box2dWeb-2.1.a.3.js"></script>
+	<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+	<script src="js/bone.js"></script>
+	<script src="js/bone.creater.v9.js"></script>
+	<script src="iio-sdk/iioDebugger-1.0.js"></script>
+</head>
+<body></body>
+<script>
+
+/****************	gobal parameter  *******************/
+var Default ={
+	//原始比例的游戏width，height
+	width:960,
+	height:640,
+	offsetX:20,	
+	offsetY:20,
+
+	fill:'black',
+	stroke:'white',
+	bulletWaitTime:3 //打出的子弹命中后多少秒后消失
+}
+
+var ctx,canvas;
+
+var GameWidth,GameHeight,
+	GameHeight,GameWidth,
+	GameLeftTop,GameRightTop,GameLeftBottom,GameRightBottom,
+	GameLevel = 0;
+
+var gameSize;
+
+var world,robot,door;
+var gameObj = {};		//除player之外的Obj
+var ioSpriteList = [];
+var destroyList = [];	//即将销毁的的obj
+
+var levelObj = [];		//暂存将要销毁的obj
+
+
+var PI = Math.PI,
+	deg = PI/180,//角度换弧度
+	px = 30,	//物理世界度量单位换像素单位  15*px
+	bp = 1/30;	//像素单位换物理世界度量单位  400*bp
+
+
+
+function gameApp(io) {
+	io.activateDebugger();
+
+    ctx = io.context;
+	canvas = io.canvas;
+
+	gameSize = Math.min(canvas.width/Default.width,canvas.height/Default.height);
+	GameWidth = (Default.width-Default.offsetX)*gameSize;
+	GameHeight = (Default.height-Default.offsetY)*gameSize;
+
+	GameOffsetX = Math.abs(canvas.width - GameWidth)/2;
+	GameOffsetY = Math.abs(canvas.height - GameHeight)/2;
+
+	GameLeftTop = {x:GameOffsetX,y:GameOffsetY};
+	GameRightTop = {x:GameOffsetX+GameWidth, y:GameOffsetY};
+	GameLeftBottom = {x:GameOffsetX, y:GameOffsetY+GameHeight};
+	GameRightBottom = {x:GameOffsetX+GameWidth, y:GameOffsetY+GameHeight};
+
+	console.log('GameSize:' + gameSize);
+	for(var i = 0; i<levelData.length; i++){
+		var data = levelData[i];
+		for(var j = 0; j<data.length; j++){
+			var obj = data[j];
+			levelData[i][j].x = GameLeftTop.x+obj.x*gameSize;
+			levelData[i][j].y = GameLeftTop.y+obj.y*gameSize;
+			if(typeof obj.width != 'undefined'){
+				levelData[i][j].width = obj.width*gameSize;
+				levelData[i][j].height = obj.height*gameSize;
+			}
+		}
+	}
+
+
+	var gameCreater = getGameCreater(io);
+	world = gameCreater.createWorld();
+	
+	/************	游戏外墙	**********/
+	var initOuterWall = function(){
+		var thickness = 0.1; //墙壁的厚度的一半
+		var thickPX = 3;
+
+		var sysFill = Default.fill;
+		var sysStrok = Default.stroke;
+		var fixDef = gameCreater.createFixture(new b2PolygonShape);//不能链式编程
+		gameObj.outerWall = {};
+		fixDef.shape.SetAsBox(	GameWidth*bp/2, thickness*gameSize);//width,height
+		//gameCreater的方法在度量上有自动转换,现在我们又不需要，又要设回去
+		var bodyDef = gameCreater.createBody( canvas.width/2, (GameOffsetY + thickPX));//x,y
+		bodyDef.type =  b2Body.b2_staticBody;//一般的都是动态物体，只有墙壁是静态物体
+
+		//top outer wall
+		var topWall = world.CreateBody(bodyDef);
+		//topWall.name = 'outerWall';
+		gameObj.outerWall.topWall = topWall;
+		gameCreater.renderShape(topWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+		//bottom outer wall
+		bodyDef.position.Set(canvas.width/2*bp, (GameHeight+GameOffsetY)*bp-thickness);
+		var bottomWall = world.CreateBody(bodyDef);
+		bottomWall.name = 'wall'; //只有底墙能是robot jump
+		gameObj.outerWall.bottomWall = bottomWall;
+   		gameCreater.renderShape(bottomWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+   		//left outer wall 
+   		fixDef.shape.SetAsBox( thickness*gameSize, GameHeight*bp/2);
+   		bodyDef.position.Set( GameOffsetX*bp+thickness, canvas.height/2*bp);
+   		var leftWall = world.CreateBody(bodyDef);
+   		//leftWall.name = 'outerWall';
+   		gameObj.outerWall.leftWall = leftWall;
+   		gameCreater.renderShape(leftWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+   		//right outer wall
+   		bodyDef.position.Set( (GameWidth+GameOffsetX)*bp -thickness , canvas.height/2*bp);
+   		var rightWall = world.CreateBody(bodyDef);
+   		//rightWall.name = 'outerWall';
+   		gameObj.outerWall.rightWall = rightWall;
+   		gameCreater.renderShape(rightWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+	}
+
+	/************	游戏player 骨碌机器人	**********/
+	function Robot(data,x,y,size){
+
+		this.pos = {x: x, y: y};
+		this.bones = {};
+		this.bonesArray = [];
+		this.constraint = [];
+		this.size = size*gameSize || 1*gameSize; 
+		this.body = {};	//robot的iio主体
+		this.b2body;	//robot的box2d主体
+		this.fixture;
+
+		this.isBackward = false;	//表示robot是否向后（屏幕的左方）
+		this.preX;	//水平翻转的所需x
+		this.preY;	//身体晃动运动所需
+		this.waitingY;
+		this.fromTimeGateNum = 9;
+
+
+		this.width = 80*gameSize;
+		this.height = 80*gameSize;		
+
+		/*****************		init iio Obj	********************/
+		var item,bone,jointName,boneName;
+		for(var i in data){
+			item = data[i];
+			boneName = i;
+			if(item.isMain){
+				bone = new Bone(x,y,item.size[0]*this.size,item.size[1]*this.size).addImage(item.imgsrc);
+				this.body = bone;
+				this.waitingY = y;//初始化waitingY
+			}else{
+				bone = new Bone(item.size[0]*this.size,item.size[1]*this.size).addImage(item.imgsrc);
+			}
+			
+			if(typeof item.imgOffset != 'undefined') 
+				bone.setImgOffset(item.imgOffset[0]*this.size,item.imgOffset[1]*this.size);
+				bone.angle = item.angle;
+
+			for(var j in item.joint){
+				jointName = j;
+				bone.setJoint(jointName,item.joint[jointName][0]*this.size,item.joint[jointName][1]*this.size); 
+			}
+			if(item.constraint){
+				item.constraint.unshift(boneName)
+				this.constraint.push(item.constraint);
+			}
+			bone.zIndex = item.zIndex;	//新增个人属性
+			this.bones[boneName] = bone;
+			//注意最后才addObj。因为iio每次addObj之后都会调用它的draw方法，而如果没有设置joint的话draw方法报错
+			//io.addObj(bone,item.zIndex);
+			
+		}
+
+		//自己画要对zIndex排序了，苦逼啊
+		var min = {zIndex:0},tempArray = []; 
+		for(var i in this.bones) 
+			tempArray.push(this.bones[i]);
+		this.bonesArray = tempArray.sort(function(a,b){
+			var aZIndex = a.zIndex || 0;
+			var bZIndex = b.zIndex || 0;
+			return aZIndex - bZIndex;
+		});
+
+		/*************		init box2d Obj 		**************/
+	    var fixDef = gameCreater.createFixture(new b2PolygonShape);
+		fixDef.shape.SetAsBox( this.width*bp/2, this.height*bp/2);//width,height
+		//球体的摩擦面积太少了
+		//var fixDef = gameCreater.createFixture(new b2CircleShape(80*bp/2*gameSize));
+		
+		var bodyDef = gameCreater.createBody( x, y);
+		this.b2body = world.CreateBody(bodyDef);
+		this.fixture = this.b2body.CreateFixture(fixDef);
+		//gameCreater.renderShape(this.b2body,fixDef).setStrokeStyle('red')	
+		//注意这里新增了一个额外属性
+		this.b2body.isJumping = false;
+
+		var deg = Math.PI/180;
+		var robotBones = this.bones;
+		var _this = this.body;	//robot的主体代替整个robot
+		var b2body = this.b2body;
+
+		this.update = function(cycle){
+			/**
+			*	position change
+			*/
+			this.preX = _this.pos.x;
+			this.preY = _this.pos.y;
+			var playerPos = b2body.GetPosition();
+			//对于物理世界的响应式设计过程中，物理obj的大小变了，重量变了，受到力的效果就不同了
+			//所以一般我们做受到力或脉冲作用的大小用物理obj本身的总量决定
+			var mass = b2body.GetMass();//获得obj的总质量
+			if(input[UP] && !b2body.isJumping){
+				var force = new b2Vec2(0,-mass*1.2); //0,-20浮空效果不错
+				b2body.isJumping = true;
+				b2body.ApplyImpulse(force, b2body.GetPosition());
+			}
+			if(input[RIGHT]){
+				var force = new b2Vec2(mass/2,0);
+
+				b2body.ApplyImpulse(force, {x:playerPos.x,y:playerPos.y});
+			}
+			if(input[LEFT]){
+				var force = new b2Vec2(-mass/2,0);
+				b2body.ApplyImpulse(force, {x:playerPos.x,y:playerPos.y});
+			}
+			/**
+			*	animation change
+			*/
+			if (input[LEFT] && !input[RIGHT])
+				this.walk(cycle, this.isBackward ? 'go' : 'back');
+		    else if (input[RIGHT] && !input[LEFT])
+		        this.walk(cycle, this.isBackward ? 'back' : 'go');
+		    else if (input[UP])
+		    	this.jump('up');
+		    else this.wait(cycle);
+
+
+			_this.pos.x = b2body.GetPosition().x*px;
+			_this.pos.y = b2body.GetPosition().y*px - 40*gameSize;
+		  
+		    /**
+		    *	update bones 
+		    */
+		    /***********	手臂和头跟着鼠标位置而改变	**************/
+	        //如果使用手的关节会发生非常帅的震动动画
+	       	var handPos = robotBones.body.getJointAbsPos('head');
+
+	       	var angleD = Math.atan2(mousePos.y-handPos.y,mousePos.x-handPos.x);
+	       	//angleD 的正常范围是-1.57~1.57之间（3.14/2= 1.57 ）
+	       	if(angleD >1.57 || angleD < -1.57 ){
+	       		this.isBackward = true;
+	       		this.preX = _this.pos.x; //update
+	       		_this.pos.x = canvas.width - _this.width -_this.pos.x;
+	       		//b2body.SetPosition({x:_this.pos.x*bp,y:b2body.GetPosition().y});
+	       		angleD = Math.PI- angleD;
+	       	}else{
+	       		this.isBackward = false;
+	       	}
+	        robotBones.armR.angle = angleD;
+	        robotBones.weapon.angle = angleD;
+	        robotBones.chest.angle = angleD;
+	        robotBones.head.angle = angleD;
+	        robotBones.armL.angle = robotBones.armR.angle-70*deg;
+	        //手臂和手的角度是固定的
+	        robotBones.handR.angle = angleD-90*deg;
+	        robotBones.handL.angle = robotBones.armL.angle;
+
+			/************	集合所有动作都要更新关节之间的位置	***************/
+	        for(var i = 0; i< this.constraint.length; i++){
+	        	var constraint = this.constraint[i];
+	        	var childBone = robotBones[constraint[0]];
+	        	var parentBone = robotBones[constraint[1]];
+	        	childBone.setPosByJoint(parentBone,constraint[2]);
+	        }
+
+		};
+
+		//现在是有box2d的obj的位置更新body的位置，所以之前的身体晃动函数不生效了
+		//留待以后解决
+
+		this.wait = function(cycle){
+
+			this.preY = _this.pos.y;
+	        //要身体下降的距离跟大腿弯身的距离要一致才能保证脚尖水平保持一致
+	        robotBones.body.pos.y = Math.sin(cycle+Math.PI*-.6) * .3+ this.preY;
+	        this.waitingY = _this.pos.y;
+
+	        var waitLeg = function(boneA,boneB,c,thighB,isRight){
+				var thigh = 9*deg,
+					thighB = thighB*deg,
+					calf =  45*deg,
+					calfO =  -90*deg;
+
+				var angleA = Math.sin(c)* thigh + thighB;
+				var angleB = Math.sin(c + calfO) * calf + calf;
+							
+				boneA.angle = angleA;
+				boneB.angle = isRight ? 45*deg: 5*deg;
+	        }
+
+	        waitLeg(robotBones.legL, robotBones.calfL, cycle,-53,false);
+			waitLeg(robotBones.legR, robotBones.calfR, cycle ,0,true);
+		}
+
+		this.swing = function(parentBone,childBone,c,settings,isLeg){
+			var	thigh = settings[0]*deg,
+				thighB = settings[1]*deg,
+				calf =   settings[2]*deg,
+				calfO =   settings[3]*deg;
+
+			var angleA = Math.sin(c)* thigh + thighB;
+			if(isLeg){
+				var angleB = Math.sin(c + calfO) * calf + calf;
+			}else{
+				var angleB = Math.sin(c - calfO) * calf + calf;
+			}
+						
+			parentBone.angle = angleA;
+			childBone.angle = isLeg ? parentBone.angle+angleB : parentBone.angle-angleB;
+		}
+		        			  	//thigh  thighB   calf   calfO
+    	var settings_go_leg   = [65,	-20,	45,		-105];
+    	var settings_go_arm    = [45,      0,	30,		180]; 
+    	var settings_back_leg = [45,	-13,	45,		140];
+    	var settings_back_arm  = [20,	-11,	27,		180];
+	
+		this.walk = function(cycle,goOrBack){
+			//身体晃动运动
+			this.preY = robotBones.body.pos.y;
+	        robotBones.body.pos.y = Math.sin(cycle*2+Math.PI*3/2) * .8+ this.preY;
+
+			if(goOrBack == 'go') cycle+=0.08;
+	        robotBones.body.angle = Math.sin(cycle) * 6*deg;
+	        //head这里在没有武器的时候的动作，有武器的时候动作会被覆盖
+	        robotBones.head.angle = Math.sin(cycle) * 10*deg;
+	        var settings_leg = goOrBack == 'back' ? settings_back_leg : settings_go_leg;
+	        var settings_arm = goOrBack == 'back' ? settings_back_arm : settings_go_arm;
+
+			this.swing(robotBones.legL, robotBones.calfL, cycle ,settings_leg,true);
+			this.swing(robotBones.legR, robotBones.calfR, cycle + Math.PI,settings_leg,true);
+			//this.swing(robotBones.armL, robotBones.handL,cycle + Math.PI,settings_arm,false);
+			//this.swing(robotBones.armR, robotBones.handR, cycle,settings_arm,false);
+
+			
+		}
+
+		this.jump = function(upOrDown){
+			if(upOrDown == 'up'){
+				this.bones.legL.angle = -45*deg;
+				this.bones.calfL.angle = 45*deg;
+				this.bones.legR.angle = 45*deg;
+				this.bones.calfR.angle = 45*deg;
+			}
+		}
+
+		//settings and getting
+		this.setPosition = function(x,y){
+			var posObj = {};
+			if(typeof x.x != 'undefined'){
+				posObj.x = x.x*bp;
+				posObj.y = x.y*bp;
+			}else if(typeof y != 'undefined'){
+				posObj.x = x*bp;
+				posObj.y = y*bp;
+			}
+			this.b2body.SetPosition(posObj);
+		}
+
+	}
+
+	/************	开枪方法	**********/
+	var fireLaser = function(){
+		//var handPos = robot.body.getJointAbsPos('head');
+		var handPos = robot.bones.weapon.getJointAbsPos('muzzle');
+		//水平翻转真是是个麻烦事,目前使用这种不是很准确的位置设置,有空再调
+		if(robot.isBackward){
+			handPos.x =  canvas.width - robot.bones.weapon.width/4 -robot.bones.weapon.pos.x;
+		}
+		var d = mousePos.distance(handPos)*bp/2;
+		var vx = (mousePos.x-handPos.x)/d;
+		var vy = (mousePos.y-handPos.y)/d;
+
+
+		var fixDef = gameCreater.createFixture(new b2CircleShape(0.2*gameSize));
+
+		var bodyDef = gameCreater.createBody( handPos.x, handPos.y);//x,y
+
+		laserB2Obj = world.CreateBody(bodyDef);
+		laserB2Obj.name = 'laser';	//注意这里新增个属性
+		laserB2Obj.ApplyImpulse(new b2Vec2(vx,vy),laserB2Obj.GetPosition());
+
+		gameCreater.renderShape(laserB2Obj,fixDef).addImage('images/laserGreen.png');
+		//子弹消失的时间
+		laserB2Obj.waitTime = Default.bulletWaitTime;
+					destroyList.push(laserB2Obj);
+
+	}
+
+	/************	碰撞检测处理	**********/
+	var collisionHandler = function(){
+		//轮循物理世界碰撞发生列表
+		for(var cn = world.GetContactList(); cn != null; cn = cn.GetNext()){
+			var body1 = cn.GetFixtureA().GetBody();
+			var body2 = cn.GetFixtureB().GetBody();
+
+			/***************	身体弹跳碰撞	**************/
+			//这里body1 body2没有都检查
+			if(body1 == robot.b2body && body2.name == 'wall'){
+				if(body2.GetPosition().y - robot.b2body.GetPosition().y
+					 >= (robot.height+(body2.height || 0) -5)*bp/2){
+					robot.b2body.isJumping = false;
+				}
+			}
+			
+			/**************		子弹和box检测	**************/
+			if( body1.name == 'laser' && body2.name == 'box' ||
+				body2.name == 'laser' && body1.name == 'box' ){
+
+				var pos1 = body1.GetPosition();
+				var pos2 = body2.GetPosition();
+				var laserObj,boxObj;
+				if(body1.name == 'laser'){
+					laserObj = body1;
+					boxObj = body2;
+				}else{
+					laserObj = body2;
+					boxObj = body1;
+				}
+
+				if(typeof body1.hasFlash == 'undefined' && typeof body2.hasFlash == 'undefined'){
+					var flashRect = new iio.ioRect( (pos1.x+pos2.x)/2*px, (pos1.y+pos2.y)/2*px,56,54 )
+								  .addImage('images/laserGreenShot.png')
+								  .enableKinematics()
+								  //设置了shrink的obj能够在渐隐结束后自己remove
+								  .shrink(.1); //不断收缩直到看不见，填的值为收缩速度
+					io.addToGroup('fireFlash',flashRect,10);
+
+					//一次碰撞会触发多次的，到时health减少的计算就不可控
+					//放到if体内，确保一次碰撞触发一次
+					boxObj.health--;
+					if(boxObj.health == 0) destroyList.push(boxObj);
+					laserObj.hasFlash = true;
+				}
+			}
+
+			/***************	胜利检测	**************/
+			if(body1 == robot.b2body && body2 == door.b2body){
+				startGameByLevel(++GameLevel);
+			}
+
+			/***************	弹簧检测	*******************/
+			if(body1 == robot.b2body && body2.name == 'spring'){
+				//虽然向上的脉冲跟跳跃一样，但这里多次触发给予脉冲效果强很多
+				body1.ApplyImpulse(new b2Vec2(0,-1.2*body1.GetMass()),body1.GetPosition());
+			}
+
+			/***************	时空门检测	*******************/
+			if(body1 == robot.b2body && body2.name == 'timeGate' && body1.fromTimeGateNum != body2.fromNum){
+				var toGate = gameObj.timeGate[body2.toNum];
+				if(!toGate) return;
+				robot.b2body.fromTimeGateNum = body2.toNum;
+				robot.b2body.SetPosition({x:toGate.GetPosition().x, y:toGate.GetPosition().y+70*bp});
+				//robot.b2body.ApplyImpulse(new b2Vec2(0,.5*body1.GetMass()),robot.b2body.GetPosition());
+			}
+
+		}// end of GetContactList
+	}
+
+
+	/**
+	* 启动游戏数据加载
+	*/
+	var startGameByLevel = function(level){
+
+		//销毁上一关创建的物体
+		for(var i = 0; i<levelObj.length;i++){
+			var obj = levelObj[i];
+
+			world.DestroyBody(obj);
+			io.rmvObj(obj);
+		}
+
+		//根据关卡数据创建物体
+		var data = levelData[level];
+
+		for(var i = 0; i < data.length; i++){
+			var obj = data[i];
+			if(obj.type == 'player'){
+				robot.setPosition(obj.x,obj.y);
+			}
+			if(obj.type == 'door'){
+				door.setPosition(obj.x,obj.y);
+			}
+			if(obj.type == 'wall' || obj.type == 'block'){
+				var isBlock = obj.type == 'block' ? true : false;
+				levelObj.push(
+					gameCreater.createWall(obj.x,obj.y,obj.width,obj.height,
+						obj.img ,isBlock, obj.restitution));
+			}
+			if(obj.type == 'box'){
+				levelObj.push(
+					gameCreater.createBox(obj.x,obj.y,obj.width,obj.height,obj.img,obj.restitution));
+			}
+			if(obj.type == 'spring'){
+				levelObj.push(
+					gameCreater.createSpring(obj.x,obj.y,obj.width,obj.height,obj.img,obj.restitution));
+			}
+			if(obj.type == 'timeGate'){
+
+				var timeGate = gameCreater.createTimeGate(obj.x,obj.y,obj.width,obj.height,
+														  obj.fromNum,obj.toNum,obj.img);
+				if(!(gameObj.timeGate instanceof Array)){
+					gameObj.timeGate = [];
+				}
+				gameObj.timeGate[obj.fromNum] = timeGate;
+				levelObj.push(timeGate);
+			}
+
+
+		}
+	}
+
+	/******************		生成常驻gameobj(要确保先于其他人生成)		*****************/
+	
+	initOuterWall();
+	//var x = gameObj.outerWall.leftWall.GetPosition().x*px + 100*gameSize;
+	//var y = canvas.height/2;
+	var playerData = levelData[0][0];
+	robot = new Robot(robotData,playerData.x,playerData.y,0.35);
+	var doorData = levelData[0][1];
+	// var x = canvas.width-GameOffsetX-60*gameSize;
+	// var y = canvas.height-GameOffsetY-60*gameSize;
+	door = gameCreater.createDoor(doorData.x,doorData.y);
+
+	//gameCreater.createSomeObject();
+	startGameByLevel(GameLevel);
+
+	var cycle=0;
+	io.setFramerate(60,function(){
+		world.Step(1/60, 10, 10);
+
+		cycle += 0.1;
+		//robot的update的draw 和 ioAppManager管理分离
+		robot.update(cycle);
+		io.draw();	//除robot其他obj
+		collisionHandler();	//处理碰撞检测
+
+		var flashes = io.getGroup('fireFlash');
+		for(var i = 0; i< flashes.length; i++){
+			var flashRect = flashes[i];
+			flashRect.update();
+			flashRect.draw(ctx);
+			if(Math.abs(flashRect.width < .1) && Math.abs(flashRect.height < .1)){
+				io.rmvFromGroup(flashRect,'fireFlash');
+			}
+			
+		}
+
+		//遍历那些将要去除的obj
+		for(var i = 0; i< destroyList.length; i++){
+			var obj = destroyList[i];
+			obj.waitTime = obj.waitTime || 0;
+			obj.waitTime -= 1/60;
+			if(obj.waitTime <= 0){
+				world.DestroyBody(obj);
+				io.rmvObj(obj);
+				destroyList.splice(i,1);
+			}
+		}
+
+		//遍历ioObject上的一些动画
+		for(var i = 0; i< ioSpriteList.length; i++){
+			var sprite = ioSpriteList[i];
+			sprite.update();
+			sprite.draw(ctx);
+			//使用自主研发的动画效果
+			if(sprite == door.body){
+				var width = sprite.width,
+					height = sprite.height,
+					owidth = sprite.originalWidth,
+					oheight = sprite.originalHeight;
+				var rate = sprite.myShrinkRate;
+
+				if(sprite.isShrink){
+					sprite.width *=rate;
+					sprite.height *=rate;
+				}else{
+					sprite.width /= rate;
+					sprite.height /= rate;
+				}
+				if(width < owidth*.8 && height < owidth*.8){
+					sprite.isShrink = false;
+				}else if(width >= owidth && height >= oheight){
+					sprite.isShrink = true;
+				}
+			}
+			
+		}
+
+
+		/**
+		*	为什么我不把robot的骨碌都交给iio，因为robot有个水平翻转效果。
+		*	robot的骨骼动画是渲染层，应该跟物理引擎层分开,水平旋转也不会影响物理引擎的渲染
+		**/
+		//水平翻转整套效果
+		if(robot.isBackward){
+			io.context.save();
+			io.context.translate(io.canvas.width, 0);
+			io.context.scale(-1, 1);		
+		}
+		//遍历所有的骨头draw
+		for(var i = 0 ; i< robot.bonesArray.length; i++)
+			robot.bonesArray[i].draw(ctx);
+
+		if(robot.isBackward){
+			io.context.restore();
+			//注意这里需要恢复context没有旋转的时候的位置
+			//严格上水平翻转修改的pos.x应该在drawImage层面，但是在drawImage层上修改绘画的pos
+			//会影响其它gameObj，我们通过绘画时设置robot的位置，绘画过后恢复回更新前正确的位置
+			robot.body.pos.x = robot.preX;
+			//注意的是我们现在已经把robot翻转和游戏里面的其他obj抽离了，能做到了渲染层的水平翻转
+			//不需要再设置逻辑的位置了。如果设置了还会出现bug
+			//robot.b2body.SetPosition({x:robot.preX*bp,y:robot.b2body.GetPosition().y});
+		}
+	});
+
+
+	/*********	input & contorler	**********/
+	
+
+	var input = [];
+	var LEFT = 0;
+	var RIGHT = 1;
+	var UP = 2;
+	var DOWN = 3;
+	var SPACE = 4;
+	var updateInput = function(event, boolValue){
+		if(iio.keyCodeIs('left arrow', event) || iio.keyCodeIs('a', event)){
+			input[LEFT] = boolValue;
+		}
+		if(iio.keyCodeIs('right arrow', event) || iio.keyCodeIs('d', event)){
+			input[RIGHT] = boolValue;
+		}
+		if(iio.keyCodeIs('up arrow', event) || iio.keyCodeIs('w', event)){
+			input[UP] = boolValue;
+		}
+		if(iio.keyCodeIs('down arrow', event) || iio.keyCodeIs('s', event)){
+			input[DOWN] = boolValue;
+		}
+		if(iio.keyCodeIs('space',event)){
+			input[SPACE] = boolValue;
+		}
+	}
+	
+	//必须给mousePos给默认值，不然刷新后没有发生mousemove，mousePos为空而报错
+	var mousePos = {x:io.canvas.width,y:0};
+
+	io.canvas.addEventListener('mousemove', function(event){
+		mousePos = io.getEventPosition(event);
+	});
+
+	canvas.addEventListener('mousedown',function(event){
+		fireLaser();
+	});
+	window.addEventListener('keydown',function(event){
+		updateInput(event,true);
+	});
+	window.addEventListener('keyup',function(event){
+		updateInput(event,false);
+	});
+
+
+	io.setBGColor('#555');
+  
+}; iio.start(gameApp);
+
+</script>
+</html>

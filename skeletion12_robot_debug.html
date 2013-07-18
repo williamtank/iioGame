@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>skeleton robot</title>
+	<style>
+	.range{
+		display: inline-block;
+		width: 140px;
+	}
+	.range p, .range div{
+		display: inline-block;
+		padding: 0;
+		margin: 0;
+		text-align: left;
+		font-family: '微软雅黑';
+		color: #bbb;
+		position: relative;
+		top: -15px;
+		z-index: -1;
+	}
+	</style>
+</head>
+<body>
+	<div id="leg_controller">
+		<div class="range">
+			<input type="range" id="speedRange_leg" max="0.1" min="0.01" step="0.01" value="0.05">
+			<p>Speed:<div id="speedRange_leg_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighRange_leg" max="90" min="0" step="1" value="45">
+			<p>Thigh:<div id="thighRange_leg_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfRange_leg" max="90" min="0" step="1" value="45">
+			<p>Calf:<div id="calfRange_leg_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighBase_leg" max="90" min="-90" step="1" value="0">
+			<p>ThighBase:<div id="thighBase_leg_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfOffset_leg" max="180" min="-180" step="1" value="-90">
+			<p>CalfOffset:<div id="calfOffset_leg_value"></div></p>
+		</div>	
+	</div>
+	<div id="arm_controller">
+		<div class="range">
+			<input type="range" id="speedRange_arm" max="0.1" min="0.01" step="0.01" value="0.05">
+			<p>Speed:<div id="speedRange_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighRange_arm" max="90" min="0" step="1" value="45">
+			<p>Thigh:<div id="thighRange_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfRange_arm" max="90" min="0" step="1" value="45">
+			<p>Calf:<div id="calfRange_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighBase_arm" max="90" min="-90" step="1" value="0">
+			<p>ThighBase:<div id="thighBase_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfOffset_arm" max="180" min="-180" step="1" value="-90">
+			<p>CalfOffset:<div id="calfOffset_arm_value"></div></p>
+		</div>	
+	</div>
+	<canvas id="skeletonCanvas" width="1024" height="600"></canvas>
+
+<div id="debuger">
+	<input type="range" id="rate" step="0.05" max="1" min="-1" value="-0.6">
+	<input type="range" id="thighL" step="1" max="100" min="-100" value="-53">
+	<input type="range" id="thighB" step="1" max="100" min="-100" value="0">
+	<button onclick="alert(gobal.thighB+' | '+gobal.thighL+' | '+gobal.rate)">alert</button>
+</div>
+</body>
+
+<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+<script >
+var gobal = {}; //for debug
+/**
+* Bone(width,height)	骨骼位置大部分是依附关节,所以提供长宽就可以
+* Bone(x,y,width,height)
+*/
+
+var Bone = iio.inherit(function(x,y,width,height){
+	//关节集合
+	this.joints = {};
+	//中心旋转角度，为iio处理
+	this.rotation = 0;	
+	//按fixed关节旋转角度
+	this.angle = 0;	    
+
+	//注意这不能使用this._super.call(this);因为这时继承关系还没有继承
+	if(arguments.length == 2){
+		iio.ioRect.call(this,0,0,x,y);
+	}else{
+		iio.ioRect.call(this,x,y,width,height);
+	}
+	//iio.ioRect.apply(this, arguments);
+},iio.ioRect);
+
+//关节的x,y是相对于骨头的pos(就是骨头的pos)
+Bone.prototype.setJoint = function(name,x,y){
+	if(!this.joints) this.joints = {};
+	//pos为关节的绝对位置（因运动而不断重设）
+	this.joints[name] = {x:x,y:y,pos:{x:x,y:y}};
+}
+Bone.prototype.getJoint = function(name){
+	return this.joints[name];
+}
+Bone.prototype.getJointAbsPos = function(name){
+	if(this.joints[name]){
+		var targetJoint = this.joints[name],
+			fixedJoint = this.joints['fixed'];
+		var disX = targetJoint.x - fixedJoint.x;
+		var disY = targetJoint.y - fixedJoint.y;
+
+		var xPos = this.pos.x+ fixedJoint.x + Math.cos(this.angle)*disX - Math.sin(this.angle)*disY;
+		var yPos = this.pos.y+ fixedJoint.y + Math.sin(this.angle)*disX + Math.cos(this.angle)*disY;
+		//同时更新关节的实际位置
+		targetJoint.pos.x = xPos;
+		targetJoint.pos.y = yPos;
+		//dot(xPos,yPos,io.context);
+		return {x: xPos, y: yPos}
+	}
+}
+Bone.prototype.setPosByJoint = function(bone,name){
+	if(bone instanceof Bone && bone.joints[name]){
+		var jointAbsPos = bone.getJointAbsPos(name);
+		var thisFixed = this.joints['fixed'];
+		var boneFixed = bone.joints['fixed'];
+		//把自身的固定关节依附到设定关节中
+		thisFixed.pos.x = jointAbsPos.x;
+		thisFixed.pos.y = jointAbsPos.y;
+		//同时更新自身的位置
+		this.pos.x = jointAbsPos.x - thisFixed.x;
+		this.pos.y = jointAbsPos.y - thisFixed.y;
+
+	}
+}
+Bone.prototype.drawJoints = function(ctx){
+	//重新调整自身关节绘画的位置(不影响实际位置)
+	for(var i in this.joints){
+		var joint = this.joints[i];
+		//关节是依附在骨骼上，那么他的位置是相对于骨骼
+		//它的位置只要计算在骨骼正常位置情况下所在就行了,骨骼旋转或平移会自动相对的了
+		var posX = this.pos.x + joint.x;
+		var posY = this.pos.y + joint.y;
+
+		this.drawJoint(ctx,posX,posY);
+	}
+}
+Bone.prototype.drawJoint = function(ctx,x,y,radius,lineWidth,color){
+	ctx.lineWidth = lineWidth || 2;
+    ctx.strokeStyle = color || 'green';
+    radius = radius || 4;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+Bone.prototype.draw = function(ctx,pos,r){
+	ctx.save();
+
+	var jointPos = this.joints['fixed'].pos; //取出固定关节的实际位置(绝对位置)
+	ctx.translate(jointPos.x, jointPos.y);
+	ctx.rotate(this.angle);
+	ctx.translate(-jointPos.x, -jointPos.y);
+	//如果带有自己的绘制方法，就不使用默认的矩形
+	if(typeof this.redraw == 'function'){
+		this.redraw(ctx);
+	}else{
+		//如果为对象设置了图片渲染，就不使用默认样式
+		if(!this.img){
+			this.setStrokeStyle('#000').setFillStyle('#fff');
+		}
+		//this.setStrokeStyle('#ddd')
+		//默认样式,iio没有设置默认样式，不填是不能显示
+		this._super.draw.apply(this,arguments);
+	}
+	
+	//画出关节
+	this.drawJoints(ctx);
+
+	ctx.restore();	
+}
+
+
+/**************** 	辅助性函数	*******************/
+var dot = function(x,y,ctx){
+	ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+var leg = {};
+var arm = {};
+var initElementDom = function(){
+
+	leg.speed = document.getElementById('speedRange_leg');
+	leg.thigh = document.getElementById('thighRange_leg');
+	leg.thighB = document.getElementById('thighBase_leg');
+	leg.calf = document.getElementById('calfRange_leg');
+	leg.calfO = document.getElementById('calfOffset_leg');
+
+	leg.speedValue = document.getElementById('speedRange_leg_value');
+	leg.thighValue = document.getElementById('thighRange_leg_value');
+	leg.thighBValue = document.getElementById('thighBase_leg_value');
+	leg.calfValue = document.getElementById('calfRange_leg_value');
+	leg.calfOValue = document.getElementById('calfOffset_leg_value');
+
+	
+	arm.speed = document.getElementById('speedRange_arm');
+	arm.thigh = document.getElementById('thighRange_arm');
+	arm.thighB = document.getElementById('thighBase_arm');
+	arm.calf = document.getElementById('calfRange_arm');
+	arm.calfO = document.getElementById('calfOffset_arm');
+
+	arm.speedValue = document.getElementById('speedRange_arm_value');
+	arm.thighValue = document.getElementById('thighRange_arm_value');
+	arm.thighBValue = document.getElementById('thighBase_arm_value');
+	arm.calfValue = document.getElementById('calfRange_arm_value');
+	arm.calfOValue = document.getElementById('calfOffset_arm_value');
+
+}
+
+
+/****************	机器人数据	***********************/
+
+var robotData = {
+	//骨骼部分
+	body:{
+		imgsrc:'images/robot/robot_body.png',
+		size:[40,64],
+		angle:Math.PI/18,
+		joint:{'fixed':[0,32], 'head':[0,-32]},
+		isMain:true,	//主骨骼标示位
+		zIndex:0,
+	},
+	head:{
+		imgsrc:'images/robot/robot_head.png',
+		imgOffset:[0,-45],
+		size:[128,72],
+		angle:0,
+		joint:{'fixed':[0,0]},
+		constraint:['body','head'],
+		zIndex:0
+	},
+	chest:{
+		imgsrc:'images/robot/robot_chest.png',
+		size:[72,36],
+		angle:0,
+		joint:{'fixed':[-10,-5]},
+		constraint:['body','head'],
+		zIndex:0
+	},
+	legL:{
+		imgsrc:'images/robot/robot_legL.png',
+		size:[56,112],
+		angle:0,
+		joint:{'fixed':[0,-40], 'knee':[0,40]},
+		constraint:['body','fixed'],
+		zIndex:-1
+	},
+	calfL:{
+		imgsrc:'images/robot/robot_calf.png',
+		size:[56,168],
+		angle:0,
+		joint:{'fixed':[0,-65] },
+		constraint:['legL','knee'],
+		zIndex:-1
+	},
+	legR:{
+		imgsrc:'images/robot/robot_legR.png',
+		size:[56,112],
+		angle:0,
+		joint:{'fixed':[0,-40],'knee':[0,40]},
+		constraint:['body','fixed'],
+		zIndex:1
+	},
+	calfR:{
+		imgsrc:'images/robot/robot_calf.png',
+		size:[56,168],
+		angle:0,
+		joint:{'fixed':[0,-65] },
+		constraint:['legR','knee'],
+		zIndex:1
+	},
+	armR:{
+		imgsrc:'images/robot/robot_armR.png',
+		size:[56,76],
+		angle:0,
+		joint:{'fixed':[0,-25],'elbow':[0,25]},
+		constraint:['body','head'],
+		zIndex:2
+	},
+	handR:{
+		imgsrc:'images/robot/robot_handR.png',
+		size:[56,76],
+		angle:0,
+		joint:{'fixed':[0,-30],'hand':[0,30]},
+		constraint:['armR','elbow'],
+		zIndex:3
+	},
+	palmR:{
+		imgsrc:'images/robot/robot_palmR.png',
+		size:[28,36],
+		angle:-90*Math.PI/180,
+		joint:{'fixed':[0,-16]},
+		constraint:['handR','hand'],
+		zIndex:2
+	},
+	armL:{
+		imgsrc:'images/robot/robot_armL.png',
+		size:[56,76],
+		angle:0,
+		joint:{'fixed':[0,-25],'elbow':[0,25]},
+		constraint:['body','head'],
+		zIndex:-2
+	},
+	handL:{
+		imgsrc:'images/robot/robot_handL.png',
+		size:[40,76],
+		angle:0,
+		joint:{'fixed':[0,-30],'hand':[0,30]},
+		constraint:['armL','elbow'],
+		zIndex:-2
+	},
+	palmL:{
+		imgsrc:'images/robot/robot_palmL.png',
+		size:[28,36],
+		angle:-90*Math.PI/180,
+		joint:{'fixed':[0,0]},
+		constraint:['handL','hand'],
+		zIndex:-2
+	},
+	weapon:{
+		imgsrc:'images/robot/robot_weapon.png',
+		size:[320,64],
+		angle:0,
+		joint:{'fixed':[-120,10]},
+		constraint:['handR','hand'],
+		zIndex:1
+	}
+}
+
+
+/****************	main app	***********************/
+var bone0,bone1,robot,body;
+var skeletonApp = function(io){
+
+	function Robot(data,x,y){
+
+		this.pos = {x: x, y: y};
+		this.bones = {};
+		this.constraint = [];
+ 
+		var item,bone,jointName,boneName;
+		for(var i in data){
+			item = data[i];
+			boneName = i;
+			if(item.isMain){
+				bone = new Bone(x,y,item.size[0],item.size[1]).createWithImage(item.imgsrc);
+				body = bone;
+			}else{
+				bone = new Bone(item.size[0],item.size[1]).createWithImage(item.imgsrc);
+			}
+			
+			if(typeof item.imgOffset != 'undefined') bone.setImgOffset(item.imgOffset[0],item.imgOffset[1]);
+			bone.angle = item.angle;
+
+			for(var j in item.joint){
+				jointName = j;
+				bone.setJoint(jointName,item.joint[jointName][0],item.joint[jointName][1]); 
+			}
+			if(item.constraint){
+				item.constraint.unshift(boneName)
+				this.constraint.push(item.constraint);
+			}
+
+			this.bones[boneName] = bone;
+			//注意最后才addObj。因为iio每次addObj之后都会调用它的draw方法，而如果没有设置joint的话draw方法报错
+			io.addObj(bone,item.zIndex);
+			
+		}
+
+		this.walkLeg = function(boneA,boneB,c){
+			var deg = Math.PI/180,
+				thigh = parseFloat(leg.thigh.value)*deg,
+				thighB = parseFloat(leg.thighB.value)*deg,
+				calf =  parseFloat(leg.calf.value)*deg,
+				calfO =  parseFloat(leg.calfO.value)*deg;
+
+			var angleA = Math.sin(c)* thigh + thighB;
+			var angleB = Math.sin(c + calfO) * calf + calf;
+						
+			boneA.angle = angleA;
+			boneB.angle = boneA.angle+angleB;
+		}
+
+		this.walkArm = function(boneA,boneB,c){
+			var deg = Math.PI/180,
+				thigh = parseFloat(arm.thigh.value)*deg,
+				thighB = parseFloat(arm.thighB.value)*deg,
+				calf =  parseFloat(arm.calf.value)*deg,
+				calfO =  parseFloat(arm.calfO.value)*deg;
+
+			var angleA = Math.sin(c) * thigh + thighB;
+	            angleB = Math.sin(c - calfO) * calf + calf;
+
+			boneA.angle = angleA;
+			boneB.angle = boneA.angle-angleB;
+		}
+
+		this.update = function(cycleL,cycleA){
+			this.wait(cycleL,cycleA);
+		};
+		this.walk = function(cycleL,cycleA){
+			var deg = Math.PI/180;
+		
+
+			var robotBones = this.bones;
+	        robotBones.body.angle = Math.sin(cycleL) * 5*deg;
+	        robotBones.head.angle = Math.sin(cycleA) * 10*deg;
+
+	        //数组不能用for-in
+	        for(var i = 0; i< this.constraint.length; i++){
+	        	var constraint = this.constraint[i];
+	        	var childBone = robotBones[constraint[0]];
+	        	var parentBone = robotBones[constraint[1]];
+	        	childBone.setPosByJoint(parentBone,constraint[2]);
+	        }
+
+			this.walkLeg(robotBones.legL, robotBones.calfL, cycleL);
+			this.walkLeg(robotBones.legR, robotBones.calfR, cycleL + Math.PI);
+			this.walkArm(robotBones.armL, robotBones.handL,cycleA + Math.PI);
+			this.walkArm(robotBones.armR, robotBones.handR, cycleA );
+			
+		}
+
+		this.wait = function(){
+			var deg = Math.PI/180;
+		
+
+			var robotBones = this.bones;
+			var preY = robotBones.body.pos.y;
+	        //gobal.rate = document.getElementById('rate').value;
+	        //要身体下降的距离跟大腿弯身的距离要一致才能保证脚尖水平保持一致
+	        robotBones.body.pos.y = Math.sin(cycleL+Math.PI*-.6) * .3+ preY;
+
+	        robotBones.head.angle = Math.sin(cycleA) * 2*deg;
+	        robotBones.armR.angle = 10*deg;
+	        robotBones.handR.angle = -90*deg;
+	        robotBones.armL.angle = -60*deg;
+	        robotBones.handL.angle = -60*deg;
+
+	        //数组不能用for-in
+	        for(var i = 0; i< this.constraint.length; i++){
+	        	var constraint = this.constraint[i];
+	        	var childBone = robotBones[constraint[0]];
+	        	var parentBone = robotBones[constraint[1]];
+	        	childBone.setPosByJoint(parentBone,constraint[2]);
+	        }
+
+	        var waitLeg = function(boneA,boneB,c,thighB,isRight){
+				var deg = Math.PI/180,
+				thigh = 9*deg,
+				thighB = thighB*deg,
+				calf =  parseFloat(leg.calf.value)*deg,
+				calfO =  parseFloat(leg.calfO.value)*deg;
+
+				var angleA = Math.sin(c)* thigh + thighB;
+				var angleB = Math.sin(c + calfO) * calf + calf;
+							
+				boneA.angle = angleA;
+				boneB.angle = isRight ? 45*deg: 5*deg;
+	        }
+	 		gobal.thighL = document.getElementById('thighL').value;
+	 		gobal.thighB = document.getElementById('thighB').value;
+	        waitLeg(robotBones.legL, robotBones.calfL, cycleL,gobal.thighL,false);
+			waitLeg(robotBones.legR, robotBones.calfR, cycleL ,
+				gobal.thighB,true);
+		}
+
+	}
+
+	robot = new Robot(robotData,400,200);
+	
+	console.log(io);
+	//dom元素的选择
+	initElementDom();
+	io.setBGColor('#555');
+
+	var cycleL = 0,cycleA = 0,ctx;
+	io.setFramerate(60,function(){
+		cycleL += parseFloat(leg.speed.value);
+		cycleA += parseFloat(arm.speed.value);
+		robot.update(cycleL,cycleA);
+		//现在我们把我们的骨骼对象都交给ioAppManager，但是我们的Bone对象都没有设定enableKinematics方法
+		//注意即使设定了enableKinematics方法而没有setVel，ioAppManager都不会把对象不断重绘的。
+		//所以我们在setFramerrate里面强制告诉ioAppManager，我们需要重绘
+		io.draw();
+
+		//更新显示器上的值
+		arm.speedValue.innerHTML = arm.speed.value;
+		arm.thighValue.innerHTML = arm.thigh.value;
+		arm.thighBValue.innerHTML = arm.thighB.value;
+		arm.calfValue.innerHTML = arm.calf.value;
+		arm.calfOValue.innerHTML = arm.calfO.value;
+
+		leg.speedValue.innerHTML = leg.speed.value;
+		leg.thighValue.innerHTML = leg.thigh.value;
+		leg.thighBValue.innerHTML = leg.thighB.value;
+		leg.calfValue.innerHTML = leg.calf.value;
+		leg.calfOValue.innerHTML = leg.calfO.value;
+
+	});
+
+
+}
+
+;(function(){
+
+	iio.start(skeletonApp,"skeletonCanvas");
+})();
+
+
+
+</script>
+</html>

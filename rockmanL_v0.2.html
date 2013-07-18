@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="cn">
+<head>
+	<meta charset="UTF-8">
+	<title>Rockman L</title>
+	<!--  注意js的引入顺序，有依赖关系的  -->
+	<script src="js/Box2dWeb-2.1.a.3.js"></script>
+	<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+	<script src="js/bone.js"></script>
+</head>
+<body></body>
+<script>
+var player_io = {};
+function gameApp(io) {
+	var  b2Vec2 = Box2D.Common.Math.b2Vec2
+		,  b2AABB = Box2D.Collision.b2AABB
+		,  b2BodyDef = Box2D.Dynamics.b2BodyDef
+		,  b2Body = Box2D.Dynamics.b2Body
+		,  b2FixtureDef = Box2D.Dynamics.b2FixtureDef
+		,  b2Fixture = Box2D.Dynamics.b2Fixture
+		,  b2World = Box2D.Dynamics.b2World
+		,  b2PolygonShape = Box2D.Collision.Shapes.b2PolygonShape
+		,  b2CircleShape = Box2D.Collision.Shapes.b2CircleShape
+		,  b2MouseJointDef =  Box2D.Dynamics.Joints.b2MouseJointDef;
+
+	var ctx = io.context,
+		canvas = io.canvas;
+	var GameOffsetX = 50,
+		GameOffsetY = 10,
+		GameWidth = canvas.width - GameOffsetX*2,
+		GameHeight = canvas.height - GameOffsetY*2;
+	var Default ={
+		fill:'black',
+		stroke:'white'
+	}
+	var player = {};
+	
+	var gameObj = {};	//除player之外的所有obj
+
+	var PI = Math.PI,
+		deg = PI/180,//角度换弧度
+		px = 30,	//物理世界度量单位换像素单位  15*px
+		bp = 1/30;	//像素单位换物理世界度量单位  400*bp
+
+
+	//封装了io和box2d create body直接的关系
+	//由于目前需要获取box2d的body对象，很可能这方法要废弃
+	function createB2dAndIO(bodyDef,fixDef,getb2Body){
+		var obj,body;
+		body = world.CreateBody(bodyDef);
+		obj = io.addObj(body).CreateFixture(fixDef)
+							 .GetShape()
+	                         .prepGraphics(io.b2Scale);
+		return getb2Body ? body : obj;               
+	}
+
+	function renderShape(body,fixDef){
+		return io.addObj(body).CreateFixture(fixDef)
+							 .GetShape()
+	                         .prepGraphics(io.b2Scale);
+	}
+
+	var world = io.addB2World(new b2World(
+	     new b2Vec2(0, 20)    //gravity
+	  ,  true                 //allow sleep
+	));
+
+	var createFixture = function(shape) {
+		var fixture = new b2FixtureDef();
+		fixture.density = 3;
+		fixture.friction = 0.8;
+		fixture.restitution = .3;
+		fixture.shape = shape;
+		return fixture;
+	};
+
+	var createBody = function(x, y) {
+		var b = new b2BodyDef();
+		b.position.Set(x, y);
+		b.type = b2Body.b2_dynamicBody;
+		b.linearDamping = .01;	//线性阻尼
+		b.angularDamping = .01;	//角阻尼
+		return b;
+	};
+
+	var initOuterWall = function(){
+		var thickness = 0.1; //墙壁的厚度的一半
+
+		var sysFill = Default.fill;
+		var sysStrok = Default.stroke;
+		var fixDef = createFixture(new b2PolygonShape);//不能链式编程
+		gameObj.outerWall = {};
+
+		fixDef.shape.SetAsBox(	GameWidth*bp/2,	thickness);//width,height
+
+		var bodyDef = createBody( canvas.width/2*bp, GameOffsetY*bp + thickness);//x,y
+		bodyDef.type =  b2Body.b2_staticBody;//一般的都是动态物体，只有墙壁是静态物体
+
+		//top outer wall
+		var topWall = world.CreateBody(bodyDef);
+		gameObj.outerWall.topWall = topWall;
+		renderShape(topWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+		//bottom outer wall
+		bodyDef.position.Set(canvas.width/2*bp, (GameHeight+GameOffsetY)*bp-thickness);
+		var bottomWall = world.CreateBody(bodyDef);
+		gameObj.outerWall.bottomWall = bottomWall;
+   		renderShape(bottomWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+   		//left outer wall 
+   		fixDef.shape.SetAsBox( thickness, GameHeight*bp/2);
+   		bodyDef.position.Set( GameOffsetX*bp+thickness, canvas.height/2*bp);
+   		var leftWall = world.CreateBody(bodyDef);
+   		gameObj.outerWall.leftWall = leftWall;
+   		renderShape(leftWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+   		//right outer wall
+   		bodyDef.position.Set( (GameWidth+GameOffsetX)*bp -thickness , canvas.height/2*bp);
+   		var rightWall = world.CreateBody(bodyDef);
+   		gameObj.outerWall.rightWall = rightWall;
+   		renderShape(rightWall,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+	}; initOuterWall();
+
+	var createSomeObject = function(){
+		//create some objects
+		var shape,width,height;
+		var bodyDef = createBody(0,0);
+		var fixDef;
+		for(var i = 0; i < 20; ++i) {
+		width = Math.random() + 0.2 //half width
+		height = Math.random() + 0.2 //half height
+		if(Math.random() > 0.5) {
+		 fixDef = createFixture(new b2PolygonShape);
+		 fixDef.shape.SetAsBox(width, height);
+		} else {
+		 fixDef = createFixture(new b2CircleShape(width));
+		}
+		bodyDef.position.x = Math.random() * 10+10;
+		bodyDef.position.y = Math.random() * 10+5;
+		shape=io.addObj(world.CreateBody(bodyDef)).CreateFixture(fixDef).GetShape();
+		if (shape instanceof b2CircleShape)
+		 shape.prepGraphics(io.b2Scale)
+		      .setFillStyle(Default.fill)
+		      .setStrokeStyle(Default.stroke)
+		      .drawReferenceLine();
+		else
+		 shape.prepGraphics(io.b2Scale)
+		      .setFillStyle(Default.fill)
+		      .setStrokeStyle(Default.stroke);
+		}
+	};// createSomeObject();
+   
+
+ 	var initPlayer = function(){
+		var fixDef = createFixture(new b2PolygonShape);
+		fixDef.shape.SetAsBox( 60*bp/2, 80*bp/2);//width,height
+		var bodyDef = createBody( canvas.width*bp/2, canvas.height*bp/2);//x,y
+		player = world.CreateBody(bodyDef);
+		//注意这里新增了一个额外属性
+		player.isJumping = false;
+		//for style
+		renderShape(player,fixDef).setFillStyle(Default.fill).setStrokeStyle(Default.stroke);
+ 	}; //initPlayer();
+
+ 	var Player = iio.inherit(function(){
+ 		var fixDef = createFixture(new b2PolygonShape);
+		fixDef.shape.SetAsBox( 60*bp/2, 80*bp/2);//width,height
+		var bodyDef = createBody( canvas.width*bp/2, canvas.height*bp/2);//x,y
+		player = world.CreateBody(bodyDef);
+		//注意这里新增了一个额外属性
+		player.isJumping = false;
+		//for style
+		renderShape(player,fixDef).setFillStyle(Default.fill).setStrokeStyle(Default.stroke);
+
+
+
+		iio.ioRect.call(this,player.GetPosition().x*px,player.GetPosition().x*px,60,80);
+	
+		//iio.ioRect.apply(this, arguments);
+	},iio.ioRect);
+
+
+
+ 	player_io = new Player();
+ 	player_io.setFillStyle('green');
+ 	io.addObj(player_io);
+
+ 	isIOchange = false;
+	//Set the update loop
+	io.setB2Framerate(60, function(){
+		var playerPos = player.GetPosition();
+		if(input[UP] && !player.isJumping){
+			var force = new b2Vec2(0,-20);
+			player.isJumping = true;
+			player.ApplyImpulse(force, playerPos);
+			console.log('AAAA');
+
+			isIOchange = false;
+		}
+		if(input[RIGHT]){
+			player_io.translate(8,0);
+			isIOchange = true;
+
+		}
+		if(input[LEFT]){
+			player_io.translate(-6,0);
+			isIOchange = true;
+		}
+
+
+
+		//轮循碰撞发生列表来检测汽车是否集中胜利目的地
+		for(var cn = world.GetContactList(); cn != null; cn = cn.GetNext()){
+			var body1 = cn.GetFixtureA().GetBody();
+			var body2 = cn.GetFixtureB().GetBody();
+			if((body1 == player && body2 == gameObj.outerWall.bottomWall) || 
+			   (body2 == player && body1 == gameObj.outerWall.bottomWall)){
+				//console.log('BBB')
+				player.isJumping = false;
+			}
+		}
+		//console.log(player.isJumping)
+		if(isIOchange){
+			player.SetPosition({x:player_io.pos.x*bp,y:player_io.pos.y*bp});
+		}else{
+			player_io.pos.x = player.GetPosition().x*px;
+			player_io.pos.y = player.GetPosition().y*px;
+		}
+		
+		
+	});
+
+	var input = [];
+	var LEFT = 0;
+	var RIGHT = 1;
+	var UP = 2;
+	var DOWN = 3;
+	var SPACE = 4;
+	var updateInput = function(event, boolValue){
+		if(iio.keyCodeIs('left arrow', event) || iio.keyCodeIs('a', event)){
+			input[LEFT] = boolValue;
+		}
+		if(iio.keyCodeIs('right arrow', event) || iio.keyCodeIs('d', event)){
+			input[RIGHT] = boolValue;
+		}
+		if(iio.keyCodeIs('up arrow', event) || iio.keyCodeIs('w', event)){
+			input[UP] = boolValue;
+		}
+		if(iio.keyCodeIs('down arrow', event) || iio.keyCodeIs('s', event)){
+			input[DOWN] = boolValue;
+		}
+		if(iio.keyCodeIs('space',event)){
+			input[SPACE] = boolValue;
+		}
+	}
+	window.addEventListener('keydown',function(event){
+		updateInput(event,true);
+	});
+	window.addEventListener('keyup',function(event){
+		updateInput(event,false);
+	});
+
+
+	io.setBGColor('#555');
+  
+}; iio.start(gameApp);
+
+
+</script>
+</html>

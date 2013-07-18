@@ -164,7 +164,7 @@ var SpaceShooter = function(io){
 									  .createWithImage(laserFlashImg)
 									  .enableKinematics()
 									  .setVel(meteor.vel.x,meteor.vel.y)
-									  .shrink(.1); //不断收缩直到看不见，填的值为收缩速度
+									  .shrink(.01); //不断收缩直到看不见，填的值为收缩速度
 		io.addToGroup('laser flashes',flashRect,10);
 
 		if(typeof(meteor.health) != 'undefined'){

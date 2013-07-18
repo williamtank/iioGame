@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
-	<title>skeleton 8 Doll Demo</title>
+	<title>skeleton 9</title>
 </head>
 <body></body>
 
@@ -22,34 +22,6 @@ var dot = function(x,y,ctx,color){
     ctx.arc(x, y, 4, 0, Math.PI*2, true);
     ctx.stroke();
     ctx.closePath();
-}
-
-//鼠标控制器
-var sphereHandler = function(io){
-	var mCircle = io.addObj(new iio.ioCircle(io.canvas.center.x,io.canvas.center.y+80,50)
-	                        .setFillStyle('00BAFF')
-	                        .setAlpha(.7),999);
-	//handle mouse move
-	io.canvas.addEventListener('mousemove', function(event){
-		//注意如果你只有小量obj更新，更高效的方式是重绘自身而不是整个canvas重绘
-		//但是我们把obj交给ioAppManager管理，不需要我们自己clearSelf和draw
-		//下面这种写法只会变成两种重绘机制
-		//mCircle.clearSleft(io.context);
-		//mCircle.draw(io.context);
-		sphereX = (event.x || event.clientX);
-		sphereY = (event.y || event.clientY);
-		mCircle.setPos(io.getEventPosition(event));
-	});
-
-	io.canvas.addEventListener('mousedown', function(event){
-	  	if (mCircle.contains(io.getEventPosition(event)) ){
-	      	mCircle.active = true;
-	      	dV=iio.ioVec.sub(mCircle.pos, io.getEventPosition(event));
-	 	}
-	});
-	io.canvas.addEventListener('mouseup',function(event){
-		mCircle.active = false;
-	});
 }
 
 function Point(doll){
@@ -253,6 +225,55 @@ var Doll = iio.inherit(function(x,y,structure,stiffness){
 	}
 },iio.ioObj);
 
+//鼠标控制器
+var dV = 0;  		//距离偏差
+var readyPoint = null;
+var activePoint = null;	//在调整的关节
+var sphereHandler = function(io){
+	io.canvas.addEventListener('mousedown', function(event){
+		/*for(var i in doll.points){
+			var point = doll.points[i];
+			var mousePos = io.getEventPosition(event);
+			var pointPos = new iio.ioVec(point.x,point.y);
+			if (pointPos.distance(mousePos) < 20){	//20为关节可选范围
+				activePoint = point;
+				dV = iio.ioVec.sub(point, mousePos);
+				io.canvas.style.cursor = 'move';
+				return;
+			}
+    
+		}*/
+		activePoint = readyPoint;
+	});
+	
+	io.canvas.addEventListener('mousemove', function(event){
+		//区分是否mousedown之后
+		if(activePoint){
+			activePoint.x = (event.x || event.clientX)+dV.x;
+			activePoint.y = (event.y || event.clientY)+dV.y;
+		}else{
+			for(var i in doll.points){
+				var point = doll.points[i];
+				var mousePos = io.getEventPosition(event);
+				var pointPos = new iio.ioVec(point.x,point.y);
+				if (pointPos.distance(mousePos) < 20){	//20为关节可选范围
+					readyPoint = point;
+					dV = iio.ioVec.sub(point, mousePos);
+					io.canvas.style.cursor = 'move';
+					return;
+				}else{
+					readyPoint == null;
+					io.canvas.style.cursor = 'default';
+				}
+			}
+		}
+	});
+
+	io.canvas.addEventListener('mouseup',function(event){
+		activePoint = null;
+		io.canvas.style.cursor = 'default';
+	});
+}
 
 var doll;
 var ctx,canvas;
@@ -277,7 +298,7 @@ var structure = {
 }
 
 var skeletonApp = function(io){
-	io.setBGColor('#ddd');
+	//io.setBGColor('#ddd');
 	ctx = io.context;
 	canvas = io.canvas;
 

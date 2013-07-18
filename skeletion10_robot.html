@@ -2,15 +2,14 @@
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
-	<title>skeleton 6.5</title>
+	<title>skeleton robot</title>
 	<style>
 	.range{
 		display: inline-block;
 		width: 140px;
 	}
-	.range p{
+	.range p, .range div{
 		display: inline-block;
-		width: 100%;
 		padding: 0;
 		margin: 0;
 		text-align: left;
@@ -23,26 +22,48 @@
 	</style>
 </head>
 <body>
-	<div id="controller">
+	<div id="leg_controller">
 		<div class="range">
-			<input type="range" id="speedRange" max="0.1" min="0.01" step="0.01" value="0.05">
-			<p>Speed</p>
+			<input type="range" id="speedRange_leg" max="0.1" min="0.01" step="0.01" value="0.05">
+			<p>Speed:<div id="speedRange_leg_value"></div></p>
 		</div>
 		<div class="range">
-			<input type="range" id="thighRange" max="90" min="0" step="1" value="45">
-			<p>Thigh</p>
+			<input type="range" id="thighRange_leg" max="90" min="0" step="1" value="45">
+			<p>Thigh:<div id="thighRange_leg_value"></div></p>
 		</div>
 		<div class="range">
-			<input type="range" id="calfRange" max="90" min="0" step="1" value="45">
-			<p>Calf</p>
+			<input type="range" id="calfRange_leg" max="90" min="0" step="1" value="45">
+			<p>Calf:<div id="calfRange_leg_value"></div></p>
 		</div>
 		<div class="range">
-			<input type="range" id="thighBase" max="180" min="0" step="1" value="90">
-			<p>ThighBase</p>
+			<input type="range" id="thighBase_leg" max="90" min="-90" step="1" value="0">
+			<p>ThighBase:<div id="thighBase_leg_value"></div></p>
 		</div>
 		<div class="range">
-			<input type="range" id="calfOffset" max="180" min="-180" step="1" value="-90">
-			<p>CalfOffset</p>
+			<input type="range" id="calfOffset_leg" max="180" min="-180" step="1" value="-90">
+			<p>CalfOffset:<div id="calfOffset_leg_value"></div></p>
+		</div>	
+	</div>
+	<div id="arm_controller">
+		<div class="range">
+			<input type="range" id="speedRange_arm" max="0.1" min="0.01" step="0.01" value="0.05">
+			<p>Speed:<div id="speedRange_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighRange_arm" max="90" min="0" step="1" value="45">
+			<p>Thigh:<div id="thighRange_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfRange_arm" max="90" min="0" step="1" value="45">
+			<p>Calf:<div id="calfRange_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="thighBase_arm" max="90" min="-90" step="1" value="0">
+			<p>ThighBase:<div id="thighBase_arm_value"></div></p>
+		</div>
+		<div class="range">
+			<input type="range" id="calfOffset_arm" max="180" min="-180" step="1" value="-90">
+			<p>CalfOffset:<div id="calfOffset_arm_value"></div></p>
 		</div>	
 	</div>
 	<canvas id="skeletonCanvas" width="1024" height="600"></canvas>
@@ -149,7 +170,7 @@ Bone.prototype.draw = function(ctx,pos,r){
 		if(!this.img){
 			this.setStrokeStyle('#000').setFillStyle('#fff');
 		}
-		this.setStrokeStyle('#aaa')
+		//this.setStrokeStyle('#ddd')
 		//默认样式,iio没有设置默认样式，不填是不能显示
 		this._super.draw.apply(this,arguments);
 	}
@@ -181,94 +202,107 @@ var skeletonApp = function(io){
 	* 目前我是直接用1.2.1的源码覆盖1.2.2的部分源码，使行为与1.2.1一致但也有可能还有问题
 	*/
 
-	bone0 = new Bone(400,300,120,30).addImage('images/doll/leg.png').setImgSize(120,50);
-	bone0.setJoint('fixed',-50,0);
-	bone0.setJoint('leg',50,0);
-	//io.addToGroup('bodyBack',bone0,-1);
-	io.addObj(bone0,-1);
-
-	bone1 = new Bone(120,30).addImage('images/doll/calf.png').setImgSize(140,75);
-	bone1.setJoint('fixed',-50,0);
-	bone1.setPosByJoint(bone0,'leg');
-	//io.addToGroup('bodyBack',bone1,-1);
-	io.addObj(bone1,-2);
-
-
-	var bone2 = new Bone(400,300,120,30).addImage('images/doll/leg.png').setImgSize(120,50);
-	bone2.setJoint('fixed',-50,0);
-	bone2.setJoint('leg',50,0);
-	bone2.setPosByJoint(bone0,'fixed');
-	//io.addToGroup('bodyFront',bone2,1);
-	io.addObj(bone2,1);
-
-	var bone3 = new Bone(120,20).addImage('images/doll/calf.png').setImgSize(140,75);
-	bone3.setJoint('fixed',-50,0);
-	bone3.setPosByJoint(bone2,'leg');
-	//io.addToGroup('bodyFront',bone3,1);
-	io.addObj(bone3,1);
-
 	//body
-	var body = new Bone(60,150).addImage('images/doll/body.png').setImgSize(170,68)
-							.setImgRotation(Math.PI/2);
+	var body = new Bone(400,250,40,64).addImage('images/robot/robot_body.png');
 	body.angle = Math.PI/18;
-	body.setJoint('fixed',0,65);
-	body.setJoint('head',0,-65);
-	body.setPosByJoint(bone0,'fixed');
-	//io.addToGroup('body',body);
+	body.setJoint('fixed',0,32);
+	body.setJoint('head',0,-32);
+	//body.setPosByJoint(bone0,'fixed');
 	io.addObj(body);
 
+	bone0 = new Bone(56,112).addImage('images/robot/robot_legL.png');
+	bone0.setJoint('fixed',0,-40);
+	bone0.setJoint('leg',0,40);
+	bone0.setPosByJoint(body,'fixed');
+	io.addObj(bone0,-1);
+
+	bone1 = new Bone(56,168).addImage('images/robot/robot_calf.png');//56*168
+	bone1.setJoint('fixed',0,-65);
+	bone1.setPosByJoint(bone0,'leg');
+	io.addObj(bone1,-1);
+
+
+	var bone2 = new Bone(56,112).addImage('images/robot/robot_legR.png');
+	bone2.setJoint('fixed',0,-40);
+	bone2.setJoint('leg',0,40);
+	bone2.setPosByJoint(bone0,'fixed');
+	io.addObj(bone2,1);
+
+	var bone3 = new Bone(56,168).addImage('images/robot/robot_calf.png');
+	bone3.setJoint('fixed',0,-65);
+	bone3.setPosByJoint(bone2,'leg');
+	io.addObj(bone3,1);
+
 	//arm
-	var arm0 = new Bone(110,26).addImage('images/doll/arm.png').setImgSize(120,40);
-	arm0.setJoint('fixed',-45,0);
-	arm0.setJoint('arm',45,0);
+	var arm0 = new Bone(56,76).addImage('images/robot/robot_armR.png')
+	arm0.setJoint('fixed',0,-25);
+	arm0.setJoint('arm',0,25);
 	arm0.setPosByJoint(body,'head');
-	//io.addToGroup('bodyBack',arm0,-2);
 	io.addObj(arm0,2);
 
-	var arm1 = new Bone(110,20).addImage('images/doll/handR.png').setImgSize(120,40);
-	arm1.setJoint('fixed',-45,0);
+	var arm1 = new Bone(40,76).addImage('images/robot/robot_handR.png');
+	arm1.setJoint('fixed',0,-30);
 	arm1.setPosByJoint(arm0,'arm');
-	//io.addToGroup('bodyBack',arm1,-2);
 	io.addObj(arm1,2);
 
-	var arm2 = new Bone(110,26).addImage('images/doll/arm.png').setImgSize(120,40);
-	arm2.setJoint('fixed',-45,0);
-	arm2.setJoint('arm',45,0);
+	var arm2 = new Bone(56,76).addImage('images/robot/robot_armL.png');
+	arm2.setJoint('fixed',0,-25);
+	arm2.setJoint('arm',0,25);
 	arm2.setPosByJoint(body,'head');
-	//io.addToGroup('bodyFront',arm2,1);
 	io.addObj(arm2,-1);
 
-	var arm3 = new Bone(110,20).addImage('images/doll/handR.png').setImgSize(120,40);
-	arm3.setJoint('fixed',-45,0);
+	var arm3 = new Bone(40,76).addImage('images/robot/robot_handL.png');
+	arm3.setJoint('fixed',0,-25);
 	arm3.setPosByJoint(arm2,'arm');
-	//io.addToGroup('bodyFront',arm3,1);
-	io.addObj(arm3,-2);
+	io.addObj(arm3,-1);
 
 	//head
-	var head = new Bone(50,70).addImage('images/robot/robot_head.png').setImgSize(100,70).setImgOffset(0,-40);
+	var head = new Bone(50,70).addImage('images/robot/robot_head.png').setImgSize(100,70).setImgOffset(0,-45);
 	head.setJoint('fixed',0,0);
 	head.setPosByJoint(body,'head');
-	// head.redraw = function(ctx){
-	// 	this.drawJoint(ctx,this.pos.x,this.pos.y-50,30,2,'#555');
-	// };
-	//io.addToGroup('body',head);
 	io.addObj(head,-1);
+
+	var chest = new Bone(72,36).addImage('images/robot/robot_chest.png');
+	chest.setJoint('fixed',-10,-5);
+	chest.setPosByJoint(body,'head');
+	io.addObj(chest);
 
 	console.log(io);
 
-	var els = {};
-	els.speed = document.getElementById('speedRange');
-	els.thigh = document.getElementById('thighRange');
-	els.thighB = document.getElementById('thighBase');
-	els.calf = document.getElementById('calfRange');
-	els.calfO = document.getElementById('calfOffset');
+	var leg = {};
+	leg.speed = document.getElementById('speedRange_leg');
+	leg.thigh = document.getElementById('thighRange_leg');
+	leg.thighB = document.getElementById('thighBase_leg');
+	leg.calf = document.getElementById('calfRange_leg');
+	leg.calfO = document.getElementById('calfOffset_leg');
+
+	leg.speedValue = document.getElementById('speedRange_leg_value');
+	leg.thighValue = document.getElementById('thighRange_leg_value');
+	leg.thighBValue = document.getElementById('thighBase_leg_value');
+	leg.calfValue = document.getElementById('calfRange_leg_value');
+	leg.calfOValue = document.getElementById('calfOffset_leg_value');
+
+	var arm = {};
+	arm.speed = document.getElementById('speedRange_arm');
+	arm.thigh = document.getElementById('thighRange_arm');
+	arm.thighB = document.getElementById('thighBase_arm');
+	arm.calf = document.getElementById('calfRange_arm');
+	arm.calfO = document.getElementById('calfOffset_arm');
+
+	arm.speedValue = document.getElementById('speedRange_arm_value');
+	arm.thighValue = document.getElementById('thighRange_arm_value');
+	arm.thighBValue = document.getElementById('thighBase_arm_value');
+	arm.calfValue = document.getElementById('calfRange_arm_value');
+	arm.calfOValue = document.getElementById('calfOffset_arm_value');
+
+
 
 	var walkLeg = function(boneA,boneB,c){
 		var deg = Math.PI/180,
-			thigh = parseFloat(els.thigh.value)*deg,
-			thighB = parseFloat(els.thighB.value)*deg,
-			calf =  parseFloat(els.calf.value)*deg,
-			calfO =  parseFloat(els.calfO.value)*deg;
+			thigh = parseFloat(leg.thigh.value)*deg,
+			thighB = parseFloat(leg.thighB.value)*deg,
+			calf =  parseFloat(leg.calf.value)*deg,
+			calfO =  parseFloat(leg.calfO.value)*deg;
 
 		var angleA = Math.sin(c)* thigh + thighB;
 		var angleB = Math.sin(c + calfO) * calf + calf;
@@ -280,10 +314,10 @@ var skeletonApp = function(io){
 
 	var walkArm = function(boneA,boneB,c){
 		var deg = Math.PI/180,
-			thigh = parseFloat(els.thigh.value)*deg,
-			thighB = parseFloat(els.thighB.value)*deg,
-			calf =  parseFloat(els.calf.value)*deg,
-			calfO =  parseFloat(els.calfO.value)*deg;
+			thigh = parseFloat(arm.thigh.value)*deg,
+			thighB = parseFloat(arm.thighB.value)*deg,
+			calf =  parseFloat(arm.calf.value)*deg,
+			calfO =  parseFloat(arm.calfO.value)*deg;
 
 		var angleA = Math.sin(c) * thigh + thighB;
             angleB = Math.sin(c - calfO) * calf + calf;
@@ -293,11 +327,10 @@ var skeletonApp = function(io){
 		boneB.setPosByJoint(boneA,'arm');
 	}
 
-
+	io.setBGColor('#555');
 	var cycle = 0,ctx;
 	io.setFramerate(60,function(){
-		cycle += parseFloat(els.speed.value);
-
+		cycle += parseFloat(leg.speed.value);
 		var deg = Math.PI/180;
         body.angle = Math.sin(cycle) * 5*deg;
         head.angle = Math.sin(cycle) * 10*deg;
@@ -313,6 +346,7 @@ var skeletonApp = function(io){
         arm2.setPosByJoint(body,'head');
         //arm3.setPosByJoint(arm2,'arm');
         head.setPosByJoint(body,'head');
+        chest.setPosByJoint(body,'head');
 
 		walkLeg(bone0, bone1, cycle);
 		walkLeg(bone2, bone3, cycle + Math.PI);
@@ -324,6 +358,20 @@ var skeletonApp = function(io){
 		//注意即使设定了enableKinematics方法而没有setVel，ioAppManager都不会把对象不断重绘的。
 		//所以我们在setFramerrate里面强制告诉ioAppManager，我们需要重绘
 		io.draw();
+
+
+		//更新显示器上的值
+		arm.speedValue.innerHTML = arm.speed.value;
+		arm.thighValue.innerHTML = arm.thigh.value;
+		arm.thighBValue.innerHTML = arm.thighB.value;
+		arm.calfValue.innerHTML = arm.calf.value;
+		arm.calfOValue.innerHTML = arm.calfO.value;
+
+		leg.speedValue.innerHTML = leg.speed.value;
+		leg.thighValue.innerHTML = leg.thigh.value;
+		leg.thighBValue.innerHTML = leg.thighB.value;
+		leg.calfValue.innerHTML = leg.calf.value;
+		leg.calfOValue.innerHTML = leg.calfO.value;
 
 	});
 

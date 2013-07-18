@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>skeleton robot 13</title>
+</head>
+<body>
+	<canvas id="skeletonCanvas" width="900" height="600"></canvas>
+</body>
+
+<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+<script src="js/bone.js"></script>
+<script >
+
+/**************** 	辅助性函数	*******************/
+var dot = function(x,y,ctx){
+	ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+//图片翻转测试
+var test = function(ctx){
+	var img = new Image();
+	
+	img.onload = function(){
+		ctx.save();
+
+		ctx.translate(canvas.width, 0);
+		ctx.scale(-1, 1);
+		// 下面画的图片是水平翻转的
+		ctx.drawImage(img,canvas.width - img.width -100, 100);
+
+		ctx.restore();
+	}
+	img.src = "images/robot/robot_head.png";
+	
+}
+
+
+//robot数据和Bone类在bone.js里面
+
+/****************	main app	***********************/
+var bone0,bone1,robot,canvas;		
+var skeletonApp = function(io){
+	canvas = io.canvas;
+	
+	function Robot(data,x,y,size){
+
+		this.pos = {x: x, y: y};
+		this.bones = {};
+		this.constraint = [];
+		this.size = size || 1; 
+		this.body = {};	//robot的主体
+
+		this.isBackward = false;	//表示robot是否向后（屏幕的左方）
+		this.preX;	//水平翻转的所需x
+		this.preY;	//身体晃动运动所需
+		this.waitingY;
+
+		//先暂定这两个玩意先
+		this.width = 100;
+		this.height = 200;		
+
+		/*****************		init 	********************/
+		var item,bone,jointName,boneName;
+		for(var i in data){
+			item = data[i];
+			boneName = i;
+			if(item.isMain){
+				bone = new Bone(x,y,item.size[0]*this.size,item.size[1]*this.size).addImage(item.imgsrc);
+				this.body = bone;
+				this.waitingY = y;//初始化waitingY
+			}else{
+				bone = new Bone(item.size[0]*this.size,item.size[1]*this.size).addImage(item.imgsrc);
+			}
+			
+			if(typeof item.imgOffset != 'undefined') 
+				bone.setImgOffset(item.imgOffset[0]*this.size,item.imgOffset[1]*this.size);
+			bone.angle = item.angle;
+
+			for(var j in item.joint){
+				jointName = j;
+				bone.setJoint(jointName,item.joint[jointName][0]*this.size,item.joint[jointName][1]*this.size); 
+			}
+			if(item.constraint){
+				item.constraint.unshift(boneName)
+				this.constraint.push(item.constraint);
+			}
+
+			this.bones[boneName] = bone;
+			//注意最后才addObj。因为iio每次addObj之后都会调用它的draw方法，而如果没有设置joint的话draw方法报错
+			io.addObj(bone,item.zIndex);
+			
+		}
+
+
+
+		var deg = Math.PI/180;
+		var robotBones = this.bones;
+		var _this = this.body;	//robot的主体代替整个robot
+		var goSpeed = 6, backSpeed = 4.5;
+		this.update = function(cycle){
+
+			/**
+			*	position change
+			*/
+			this.preX = _this.pos.x;
+			this.preY = _this.pos.y;
+
+			if(input[LEFT] && ! input[RIGHT] && _this.pos.x - _this.width/2 > 0){
+				_this.translate(-(this.isBackward ? goSpeed : backSpeed),0);
+			}
+			if(input[RIGHT] && ! input[LEFT] && _this.pos.x + _this.width/2 < io.canvas.width){
+				_this.translate(this.isBackward ? backSpeed : goSpeed ,0);
+			}
+			if(input[UP] && ! input[DOWN] && _this.pos.y - _this.height/2 > 0){
+
+				_this.translate(0,-goSpeed+1);
+			}
+			if(input[DOWN] && ! input[UP] && _this.pos.y + _this.height/2 < io.canvas.height){
+				_this.translate(0,goSpeed-1);
+			}
+			//左右键都没有按下的情况下，最好让robot的中心回归，因为移动过程中y会有晃动函数，如果晃动函数不断的只执行一点那么就会y不断的参数偏差
+			if(!input[LEFT] && ! input[RIGHT] && !input[UP] && ! input[DOWN]){
+				_this.pos.y = this.waitingY;
+			}
+			/**
+			*	animation change
+			*/
+			if (input[LEFT] && !input[RIGHT])
+				this.walk(cycle, this.isBackward ? 'go' : 'back');
+		    else if (input[RIGHT] && !input[LEFT])
+		        this.walk(cycle, this.isBackward ? 'back' : 'go');
+		    else this.wait(cycle);
+
+		    /***********	手臂和头跟着鼠标位置而改变	**************/
+
+	        //如果使用手的关节会发生非常帅的震动动画
+	       	var handPos = robotBones.body.getJointAbsPos('head');
+
+	       	var angleD = Math.atan2(mousePos.y-handPos.y,mousePos.x-handPos.x);
+	       	//angleD 的正常范围是-1.57~1.57之间（3.14/2= 1.57 ）
+	       	if(angleD >1.57 || angleD < -1.57 ){
+	       		this.isBackward = true;
+	       		this.preX = _this.pos.x; //update
+	       		_this.pos.x = canvas.width - _this.width -_this.pos.x;
+	       		angleD = Math.PI- angleD;
+	       	}else{
+	       		this.isBackward = false;
+	       	}
+	        robotBones.armR.angle = angleD;
+	        robotBones.weapon.angle = angleD;
+	        robotBones.chest.angle = angleD;
+	        robotBones.head.angle = angleD;
+	        robotBones.armL.angle = robotBones.armR.angle-70*deg;
+	        //手臂和手的角度是固定的
+	        robotBones.handR.angle = angleD-90*deg;
+	        robotBones.handL.angle = robotBones.armL.angle;
+
+			/************	集合所有动作都要更新关节之间的位置	***************/
+	        for(var i = 0; i< this.constraint.length; i++){
+	        	var constraint = this.constraint[i];
+	        	var childBone = robotBones[constraint[0]];
+	        	var parentBone = robotBones[constraint[1]];
+	        	childBone.setPosByJoint(parentBone,constraint[2]);
+	        }
+
+		};
+
+		this.wait = function(cycle){
+
+			this.preY = _this.pos.y;
+	        //要身体下降的距离跟大腿弯身的距离要一致才能保证脚尖水平保持一致
+	        robotBones.body.pos.y = Math.sin(cycle+Math.PI*-.6) * .3+ this.preY;
+	        this.waitingY = _this.pos.y;
+
+	        var waitLeg = function(boneA,boneB,c,thighB,isRight){
+				var thigh = 9*deg,
+					thighB = thighB*deg,
+					calf =  45*deg,
+					calfO =  -90*deg;
+
+				var angleA = Math.sin(c)* thigh + thighB;
+				var angleB = Math.sin(c + calfO) * calf + calf;
+							
+				boneA.angle = angleA;
+				boneB.angle = isRight ? 45*deg: 5*deg;
+	        }
+
+	        waitLeg(robotBones.legL, robotBones.calfL, cycle,-53,false);
+			waitLeg(robotBones.legR, robotBones.calfR, cycle ,0,true);
+		}
+
+		this.swing = function(parentBone,childBone,c,settings,isLeg){
+			var	thigh = settings[0]*deg,
+				thighB = settings[1]*deg,
+				calf =   settings[2]*deg,
+				calfO =   settings[3]*deg;
+
+			var angleA = Math.sin(c)* thigh + thighB;
+			if(isLeg){
+				var angleB = Math.sin(c + calfO) * calf + calf;
+			}else{
+				var angleB = Math.sin(c - calfO) * calf + calf;
+			}
+						
+			parentBone.angle = angleA;
+			childBone.angle = isLeg ? parentBone.angle+angleB : parentBone.angle-angleB;
+		}
+		        			  	//thigh  thighB   calf   calfO
+    	var settings_go_leg   = [65,	-20,	45,		-105];
+    	var settings_go_arm    = [45,      0,	30,		180]; 
+    	var settings_back_leg = [45,	-13,	45,		140];
+    	var settings_back_arm  = [20,	-11,	27,		180];
+	
+		this.walk = function(cycle,goOrBack){
+			//身体晃动运动
+			this.preY = robotBones.body.pos.y;
+	        robotBones.body.pos.y = Math.sin(cycle*2+Math.PI*3/2) * .8+ this.preY;
+
+			if(goOrBack == 'go') cycle+=0.08;
+	        robotBones.body.angle = Math.sin(cycle) * 6*deg;
+	        //head这里在没有武器的时候的动作，有武器的时候动作会被覆盖
+	        robotBones.head.angle = Math.sin(cycle) * 10*deg;
+	        var settings_leg = goOrBack == 'back' ? settings_back_leg : settings_go_leg;
+	        var settings_arm = goOrBack == 'back' ? settings_back_arm : settings_go_arm;
+
+			this.swing(robotBones.legL, robotBones.calfL, cycle ,settings_leg,true);
+			this.swing(robotBones.legR, robotBones.calfR, cycle + Math.PI,settings_leg,true);
+			//this.swing(robotBones.armL, robotBones.handL,cycle + Math.PI,settings_arm,false);
+			//this.swing(robotBones.armR, robotBones.handR, cycle,settings_arm,false);
+
+			
+		}
+
+	}
+
+	robot = new Robot(robotData,200,485,0.5);//485
+	
+	console.log(io);
+	io.setBGColor('#555');
+
+	/*********	input & contorler	**********/
+	//必须给mousePos给默认值，不然刷新后没有发生mousemove，mousePos为空而报错
+	var mousePos = {x:io.canvas.width,y:0};
+	io.canvas.addEventListener('mousemove', function(event){
+		mousePos = io.getEventPosition(event);
+	});
+
+	var input = [];
+	var LEFT = 0;
+	var RIGHT = 1;
+	var UP = 2;
+	var DOWN = 3;
+	var SPACE = 4;
+	var updateInput = function(event, boolValue){
+		if(iio.keyCodeIs('left arrow', event) || iio.keyCodeIs('a', event)){
+			input[LEFT] = boolValue;
+		}
+		if(iio.keyCodeIs('right arrow', event) || iio.keyCodeIs('d', event)){
+			input[RIGHT] = boolValue;
+		}
+		if(iio.keyCodeIs('up arrow', event) || iio.keyCodeIs('w', event)){
+			input[UP] = boolValue;
+		}
+		if(iio.keyCodeIs('down arrow', event) || iio.keyCodeIs('s', event)){
+			input[DOWN] = boolValue;
+		}
+		if(iio.keyCodeIs('space',event)){
+			input[SPACE] = boolValue;
+		}
+	}
+	window.addEventListener('keydown',function(event){
+		updateInput(event,true);
+	});
+	window.addEventListener('keyup',function(event){
+		updateInput(event,false);
+	});
+
+	var cycle=0;
+	io.setFramerate(60,function(){
+		
+		//现在我们把我们的骨骼对象都交给ioAppManager，但是我们的Bone对象都没有设定enableKinematics方法
+		//注意即使设定了enableKinematics方法而没有setVel，ioAppManager都不会把对象不断重绘的。
+		//所以我们在setFramerrate里面强制告诉ioAppManager，我们需要重绘
+
+		cycle += 0.08;
+		robot.update(cycle);
+
+		//水平翻转整套效果
+		if(robot.isBackward){
+			io.context.save();
+			io.context.translate(io.canvas.width, 0);
+			io.context.scale(-1, 1);		
+		}
+		io.draw();
+
+		if(robot.isBackward){
+			io.context.restore();
+			//注意这里需要恢复context没有旋转的时候的位置
+			//严格上水平翻转修改的pos.x应该在drawImage层面但是，我这里是整套的骨骼，骨碌上有运动
+			//简单的翻转不是我想要的效果。
+			robot.body.pos.x = robot.preX;
+		}
+		
+	});
+
+
+}
+
+;(function(){
+
+	iio.start(skeletonApp,"skeletonCanvas");
+})();
+
+
+
+</script>
+</html>

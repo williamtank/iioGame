@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>skeleton robot 13</title>
+</head>
+<body>
+	<canvas id="skeletonCanvas" width="1024" height="600"></canvas>
+</body>
+
+<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+<script >
+/**
+* Bone(width,height)	骨骼位置大部分是依附关节,所以提供长宽就可以
+* Bone(x,y,width,height)
+*/
+
+var Bone = iio.inherit(function(x,y,width,height){
+	//关节集合
+	this.joints = {};
+	//中心旋转角度，为iio处理
+	this.rotation = 0;	
+	//按fixed关节旋转角度
+	this.angle = 0;	    
+
+	//注意这不能使用this._super.call(this);因为这时继承关系还没有继承
+	if(arguments.length == 2){
+		iio.ioRect.call(this,0,0,x,y);
+	}else{
+		iio.ioRect.call(this,x,y,width,height);
+	}
+	//iio.ioRect.apply(this, arguments);
+},iio.ioRect);
+
+//关节的x,y是相对于骨头的pos(就是骨头的pos)
+Bone.prototype.setJoint = function(name,x,y){
+	if(!this.joints) this.joints = {};
+	//pos为关节的绝对位置（因运动而不断重设）
+	this.joints[name] = {x:x,y:y,pos:{x:x,y:y}};
+}
+Bone.prototype.getJoint = function(name){
+	return this.joints[name];
+}
+Bone.prototype.getJointAbsPos = function(name){
+	if(this.joints[name]){
+		var targetJoint = this.joints[name],
+			fixedJoint = this.joints['fixed'];
+		var disX = targetJoint.x - fixedJoint.x;
+		var disY = targetJoint.y - fixedJoint.y;
+
+		var xPos = this.pos.x+ fixedJoint.x + Math.cos(this.angle)*disX - Math.sin(this.angle)*disY;
+		var yPos = this.pos.y+ fixedJoint.y + Math.sin(this.angle)*disX + Math.cos(this.angle)*disY;
+		//同时更新关节的实际位置
+		targetJoint.pos.x = xPos;
+		targetJoint.pos.y = yPos;
+		//dot(xPos,yPos,io.context);
+		return {x: xPos, y: yPos}
+	}
+}
+Bone.prototype.setPosByJoint = function(bone,name){
+	if(bone instanceof Bone && bone.joints[name]){
+		var jointAbsPos = bone.getJointAbsPos(name);
+		var thisFixed = this.joints['fixed'];
+		var boneFixed = bone.joints['fixed'];
+		//把自身的固定关节依附到设定关节中
+		thisFixed.pos.x = jointAbsPos.x;
+		thisFixed.pos.y = jointAbsPos.y;
+		//同时更新自身的位置
+		this.pos.x = jointAbsPos.x - thisFixed.x;
+		this.pos.y = jointAbsPos.y - thisFixed.y;
+
+	}
+}
+Bone.prototype.drawJoints = function(ctx){
+	//重新调整自身关节绘画的位置(不影响实际位置)
+	for(var i in this.joints){
+		var joint = this.joints[i];
+		//关节是依附在骨骼上，那么他的位置是相对于骨骼
+		//它的位置只要计算在骨骼正常位置情况下所在就行了,骨骼旋转或平移会自动相对的了
+		var posX = this.pos.x + joint.x;
+		var posY = this.pos.y + joint.y;
+
+		this.drawJoint(ctx,posX,posY);
+	}
+}
+Bone.prototype.drawJoint = function(ctx,x,y,radius,lineWidth,color){
+	ctx.lineWidth = lineWidth || 1;
+    ctx.strokeStyle = color || 'green';
+    radius = radius || 3;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+Bone.prototype.draw = function(ctx,pos,r){
+	ctx.save();
+
+	var jointPos = this.joints['fixed'].pos; //取出固定关节的实际位置(绝对位置)
+	ctx.translate(jointPos.x, jointPos.y);
+	ctx.rotate(this.angle);
+	ctx.translate(-jointPos.x, -jointPos.y);
+	//如果带有自己的绘制方法，就不使用默认的矩形
+	if(typeof this.redraw == 'function'){
+		this.redraw(ctx);
+	}else{
+		//如果为对象设置了图片渲染，就不使用默认样式
+		if(!this.img){
+			this.setStrokeStyle('#000').setFillStyle('#fff');
+		}
+		//this.setStrokeStyle('#ddd')
+		//this.flipImage(true);	//效果不是我想要的
+		this._super.draw.apply(this,arguments);
+	}
+	
+	//画出关节
+	//this.drawJoints(ctx);
+
+	ctx.restore();	
+}
+
+
+/**************** 	辅助性函数	*******************/
+var dot = function(x,y,ctx){
+	ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
+//图片翻转测试
+var test = function(ctx){
+	var img = new Image();
+	
+	img.onload = function(){
+		ctx.save();
+
+		ctx.translate(canvas.width, 0);
+		ctx.scale(-1, 1);
+		// 下面画的图片是水平翻转的
+		ctx.drawImage(img,canvas.width - img.width -100, 100);
+
+		ctx.restore();
+	}
+	img.src = "images/robot/robot_head.png";
+	
+}
+
+
+/****************	机器人数据	***********************/
+
+var robotData = {
+	//骨骼部分
+	body:{
+		imgsrc:'images/robot/robot_body.png',
+		size:[40,64],
+		angle:Math.PI/18,
+		joint:{'fixed':[0,32], 'head':[0,-32]},
+		isMain:true,	//主骨骼标示位
+		zIndex:0,
+	},
+	head:{
+		imgsrc:'images/robot/robot_head.png',
+		imgOffset:[0,-45],
+		size:[128,72],
+		angle:0,
+		joint:{'fixed':[0,0]},
+		constraint:['body','head'],
+		zIndex:0
+	},
+	chest:{
+		imgsrc:'images/robot/robot_chest.png',
+		size:[72,36],
+		angle:0,
+		joint:{'fixed':[-10,-5]},
+		constraint:['body','head'],
+		zIndex:0
+	},
+	legL:{
+		imgsrc:'images/robot/robot_legL.png',
+		size:[56,112],
+		angle:0,
+		joint:{'fixed':[0,-40], 'knee':[0,40]},
+		constraint:['body','fixed'],
+		zIndex:-1
+	},
+	calfL:{
+		imgsrc:'images/robot/robot_calf.png',
+		size:[56,168],
+		angle:0,
+		joint:{'fixed':[0,-65] },
+		constraint:['legL','knee'],
+		zIndex:-1
+	},
+	legR:{
+		imgsrc:'images/robot/robot_legR.png',
+		size:[56,112],
+		angle:0,
+		joint:{'fixed':[0,-40],'knee':[0,40]},
+		constraint:['body','fixed'],
+		zIndex:1
+	},
+	calfR:{
+		imgsrc:'images/robot/robot_calf.png',
+		size:[56,168],
+		angle:0,
+		joint:{'fixed':[0,-65] },
+		constraint:['legR','knee'],
+		zIndex:1
+	},
+	armR:{
+		imgsrc:'images/robot/robot_armR.png',
+		size:[56,76],
+		angle:0,
+		joint:{'fixed':[0,-25],'elbow':[0,25]},
+		constraint:['body','head'],
+		zIndex:2
+	},
+	handR:{
+		imgsrc:'images/robot/robot_handR.png',
+		size:[56,76],
+		angle:0,
+		joint:{'fixed':[0,-30],'hand':[0,30]},
+		constraint:['armR','elbow'],
+		zIndex:3
+	},
+	palmR:{
+		imgsrc:'images/robot/robot_palmR.png',
+		size:[28,36],
+		angle:-90*Math.PI/180,
+		joint:{'fixed':[0,-16]},
+		constraint:['handR','hand'],
+		zIndex:2
+	},
+	armL:{
+		imgsrc:'images/robot/robot_armL.png',
+		size:[56,76],
+		angle:0,
+		joint:{'fixed':[0,-25],'elbow':[0,25]},
+		constraint:['body','head'],
+		zIndex:-2
+	},
+	handL:{
+		imgsrc:'images/robot/robot_handL.png',
+		size:[40,76],
+		angle:0,
+		joint:{'fixed':[0,-30],'hand':[0,30]},
+		constraint:['armL','elbow'],
+		zIndex:-2
+	},
+	palmL:{
+		imgsrc:'images/robot/robot_palmL.png',
+		size:[28,36],
+		angle:-90*Math.PI/180,
+		joint:{'fixed':[0,0]},
+		constraint:['handL','hand'],
+		zIndex:-2
+	},
+	weapon:{
+		imgsrc:'images/robot/robot_weapon.png',
+		size:[320,64],
+		angle:0,
+		joint:{'fixed':[-120,10]},
+		constraint:['handR','hand'],
+		zIndex:1
+	}
+}
+
+
+/****************	main app	***********************/
+var bone0,bone1,robot,canvas;
+var skeletonApp = function(io){
+	canvas = io.canvas;
+	
+	function Robot(data,x,y,size){
+
+		this.pos = {x: x, y: y};
+		this.bones = {};
+		this.constraint = [];
+		this.size = size || 1; 
+		this.body = {};	//robot的主体
+
+		//先暂定这两个玩意先
+		this.width = 100;
+		this.height = 200;		
+
+		var item,bone,jointName,boneName;
+		for(var i in data){
+			item = data[i];
+			boneName = i;
+			if(item.isMain){
+				bone = new Bone(x,y,item.size[0]*this.size,item.size[1]*this.size).addImage(item.imgsrc);
+				this.body = bone;
+			}else{
+				bone = new Bone(item.size[0]*this.size,item.size[1]*this.size).addImage(item.imgsrc);
+			}
+			
+			if(typeof item.imgOffset != 'undefined') 
+				bone.setImgOffset(item.imgOffset[0]*this.size,item.imgOffset[1]*this.size);
+			bone.angle = item.angle;
+
+			for(var j in item.joint){
+				jointName = j;
+				bone.setJoint(jointName,item.joint[jointName][0]*this.size,item.joint[jointName][1]*this.size); 
+			}
+			if(item.constraint){
+				item.constraint.unshift(boneName)
+				this.constraint.push(item.constraint);
+			}
+
+			this.bones[boneName] = bone;
+			//注意最后才addObj。因为iio每次addObj之后都会调用它的draw方法，而如果没有设置joint的话draw方法报错
+			io.addObj(bone,item.zIndex);
+			
+		}
+
+		var deg = Math.PI/180;
+		var robotBones = this.bones;
+		var playerSpeed = 4;
+		this.update = function(cycle){
+
+			/**
+			*	position change
+			*/
+			var _this = this.body;	//robot的主体代替整个robot
+			if(input[LEFT] && ! input[RIGHT] && _this.pos.x - _this.width/2 > 0){
+				_this.translate(-playerSpeed,0);
+			}
+			if(input[RIGHT] && ! input[LEFT] && _this.pos.x + _this.width/2 < io.canvas.width){
+				_this.translate(playerSpeed,0);
+			}
+			if(input[UP] && ! input[DOWN] && _this.pos.y - _this.height/2 > 0){
+				_this.translate(0,-playerSpeed+1);
+			}
+			if(input[DOWN] && ! input[UP] && _this.pos.y + _this.height/2 < io.canvas.height){
+				_this.translate(0,playerSpeed-1);
+			}
+			
+			/**
+			*	animation change
+			*/
+			if (input[LEFT] && !input[RIGHT])
+		       this.walk(cycle,true);
+		    else if (input[RIGHT] && !input[LEFT])
+		       this.walk(cycle);
+		    else this.wait(cycle);
+
+		    /***********	手臂和头跟着鼠标位置而改变	**************/
+
+	        //如果使用手的关节会发生非常帅的震动动画
+	       	var handPos = robotBones.body.getJointAbsPos('head');
+
+	       	var angleD = Math.atan2(mousePos.y-handPos.y,mousePos.x-handPos.x);
+	        robotBones.armR.angle = angleD;
+	        robotBones.weapon.angle = angleD;
+	        robotBones.chest.angle = angleD;
+	        robotBones.head.angle = angleD;
+	        robotBones.armL.angle = robotBones.armR.angle-70*deg;
+	        //手臂和手的角度是固定的
+	        robotBones.handR.angle = angleD-90*deg;
+	        robotBones.handL.angle = robotBones.armL.angle;
+
+			/************	集合所有动作都要更新关节之间的位置	***************/
+	        for(var i = 0; i< this.constraint.length; i++){
+	        	var constraint = this.constraint[i];
+	        	var childBone = robotBones[constraint[0]];
+	        	var parentBone = robotBones[constraint[1]];
+	        	childBone.setPosByJoint(parentBone,constraint[2]);
+	        }
+
+		};
+
+		this.wait = function(cycle){
+
+			var preY = robotBones.body.pos.y;
+	        //要身体下降的距离跟大腿弯身的距离要一致才能保证脚尖水平保持一致
+	        robotBones.body.pos.y = Math.sin(cycle+Math.PI*-.6) * .3+ preY;
+
+	        var waitLeg = function(boneA,boneB,c,thighB,isRight){
+				var thigh = 9*deg,
+					thighB = thighB*deg,
+					calf =  45*deg,
+					calfO =  -90*deg;
+
+				var angleA = Math.sin(c)* thigh + thighB;
+				var angleB = Math.sin(c + calfO) * calf + calf;
+							
+				boneA.angle = angleA;
+				boneB.angle = isRight ? 45*deg: 5*deg;
+	        }
+
+	        waitLeg(robotBones.legL, robotBones.calfL, cycle,-53,false);
+			waitLeg(robotBones.legR, robotBones.calfR, cycle ,0,true);
+		}
+
+		this.swing = function(parentBone,childBone,c,settings,isLeg){
+			var	thigh = settings[0]*deg,
+				thighB = settings[1]*deg,
+				calf =   settings[2]*deg,
+				calfO =   settings[3]*deg;
+
+			var angleA = Math.sin(c)* thigh + thighB;
+			if(isLeg){
+				var angleB = Math.sin(c + calfO) * calf + calf;
+			}else{
+				var angleB = Math.sin(c - calfO) * calf + calf;
+			}
+						
+			parentBone.angle = angleA;
+			childBone.angle = isLeg ? parentBone.angle+angleB : parentBone.angle-angleB;
+		}
+
+		        			  	//thigh  thighB   calf   calfO
+    	var settings_go_leg   = [45,	-10,	45,		-100];
+    	var settings_go_arm    = [45,      0,	30,		180]; 
+    	var settings_back_leg = [45,	-13,	45,		140];
+    	var settings_back_arm  = [20,	-11,	27,		180];
+	
+		this.walk = function(cycle,isBack){
+			
+	        robotBones.body.angle = Math.sin(cycle) * 6*deg;
+	        //head这里在没有武器的时候的动作，有武器的时候动作会被覆盖
+	        robotBones.head.angle = Math.sin(cycle) * 10*deg;
+	        var settings_leg = isBack ? settings_back_leg : settings_go_leg;
+	        var settings_arm = isBack ? settings_back_arm : settings_go_arm;
+
+			this.swing(robotBones.legL, robotBones.calfL, cycle,settings_leg,true);
+			this.swing(robotBones.legR, robotBones.calfR, cycle + Math.PI,settings_leg,true);
+			//this.swing(robotBones.armL, robotBones.handL,cycle + Math.PI,settings_arm,false);
+			//this.swing(robotBones.armR, robotBones.handR, cycle,settings_arm,false);
+			
+		}
+
+	}
+
+	robot = new Robot(robotData,400,485,0.5);
+	
+	console.log(io);
+	io.setBGColor('#555');
+
+	/*********	input & contorler	**********/
+	//必须给mousePos给默认值，不然刷新后没有发生mousemove，mousePos为空而报错
+	var mousePos = {x:io.canvas.width,y:0};
+	io.canvas.addEventListener('mousemove', function(event){
+		mousePos = io.getEventPosition(event);
+	});
+
+	var input = [];
+	var LEFT = 0;
+	var RIGHT = 1;
+	var UP = 2;
+	var DOWN = 3;
+	var SPACE = 4;
+	var updateInput = function(event, boolValue){
+		if(iio.keyCodeIs('left arrow', event)){
+			input[LEFT] = boolValue;
+		}
+		if(iio.keyCodeIs('right arrow', event)){
+			input[RIGHT] = boolValue;
+		}
+		if(iio.keyCodeIs('up arrow', event)){
+			input[UP] = boolValue;
+		}
+		if(iio.keyCodeIs('down arrow', event)){
+			input[DOWN] = boolValue;
+		}
+		if(iio.keyCodeIs('space',event)){
+			input[SPACE] = boolValue;
+		}
+	}
+	window.addEventListener('keydown',function(event){
+		updateInput(event,true);
+	});
+	window.addEventListener('keyup',function(event){
+		updateInput(event,false);
+	});
+
+	var cycle=0,ctx;
+	io.setFramerate(60,function(){
+		cycle += 0.08;
+		robot.update(cycle);
+		//现在我们把我们的骨骼对象都交给ioAppManager，但是我们的Bone对象都没有设定enableKinematics方法
+		//注意即使设定了enableKinematics方法而没有setVel，ioAppManager都不会把对象不断重绘的。
+		//所以我们在setFramerrate里面强制告诉ioAppManager，我们需要重绘
+		io.draw();
+	});
+
+
+}
+
+;(function(){
+
+	iio.start(skeletonApp,"skeletonCanvas");
+})();
+
+
+
+</script>
+</html>

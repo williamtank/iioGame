@@ -19,15 +19,15 @@
 <canvas id="canvas3" width="400px" height="400px"></canvas>
 
 </body>
-<script src="iio-sdk/iioEngine-1.2.2-src.js"></script>
+<script src="iio-sdk/iioEngine-1.2.2.js"></script>
 
 <script>
 
 var app1 = function(io){
 	io.addObj(new iio.ioText('GudongUniversity!!', 20,40)
 		              .setFont('20px Consolas')
-		              .setFillStyle('black'));
-	io.addObj(new iio.ioRect(50,150,60)
+		              .setFillStyle('black'))
+	var staticRect = io.addObj(new iio.ioRect(50,150,60)
 					.setFillStyle('blue')
 					.setStrokeStyle('#ddd'));
 	io.addObj(new iio.ioRect(150,150,60)
@@ -36,10 +36,10 @@ var app1 = function(io){
 					.setShadow('rgb(150,150,150)',10,10,4)
 					.enableKinematics()
 					.setTorque(.05));
-	io.addObj(new iio.ioRect(50,250,60)
+	var moveRect = io.addObj(new iio.ioRect(50,250,60)
 					.enableKinematics()
 					.setFillStyle('#00baff')
-					.setVel(5,0)
+					.setVel(3,0)
 					.setBounds(0,io.canvas.width,io.canvas.height,0,function(obj){
 						obj.vel.x = -obj.vel.x ;
 					 	return true;
@@ -52,6 +52,13 @@ var app1 = function(io){
 					// 	obj.vel.x = -obj.vel.x ;
 					// 	return true;
 					// }));
+	io.addToGroup('testGroup1',moveRect);
+	io.addToGroup('testGroup2',staticRect);
+	staticRect.setPos(300,250);
+	io.setCollisionCallback('testGroup1','testGroup2',function(rect1,rect2){
+		console.log('dfdfdf');
+		
+	});
 
 	//下面两者createWithImage和addImage都使用callback来确保渲染img的时候img已经加载
 	//使用createWithImage，根据image的大小来设置shape的大小
@@ -115,10 +122,56 @@ var app2 = function(io){
 
 }; iio.start(app2,'canvas2');
 
+var dot = function(x,y,ctx){
+	ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, Math.PI*2, true);
+    ctx.stroke();
+    ctx.closePath();
+}
+
 
 var app3 = function(io){
 	io.setBGColor('#ddd');
 
+	var head = new iio.ioRect(150,150)
+				.createWithImage('images/robot/robot_head.png',function(){
+					head.flipImage(true);
+					io.addObj(head);
+				});
+	var head2 = new iio.ioRect(150,150)
+				.createWithImage('images/robot/robot_head.png',function(){
+					io.addObj(head2);
+				});
+	var ball = new iio.ioCircle(250,100,50).setStrokeStyle('green').setFillStyle('black')
+				.enableKinematics()
+        		.setAcc(0, 0.1)
+        		.setBound('bottom', io.canvas.height, function(ball) {
+        			ball.vel.y *= -(0.8 + (ball.radius / 300));
+        
+        			if(ball.pos.y > io.canvas.height-ball.radius) {
+        				ball.pos.y = io.canvas.height-ball.radius;
+        			}
+        			if(ball.vel.y > 0) {
+        				ball.vel.y = 0;
+        			} else if(-ball.vel.y < ball.acc.y) {
+        				ball.acc.y = -ball.vel.y;
+        				if(ball.acc.y < 0.00001) {
+        					if(!ball.isRemoving) {
+        						setTimeout(function() {
+        							io.rmvObj(ball);
+        						}, 3000);
+        
+        						ball.isRemoving = true;
+        					}
+        				}
+        			}
+        
+        			return true;
+        		})
+	io.addObj(ball);
+
+	io.setFramerate(60)
 	var flySrcs = ['images/fly_normal.png','images/fly_fly.png'];
 	var fly = new iio.ioRect(50,50).createWithAnim(flySrcs,function(){
 		//image onload code

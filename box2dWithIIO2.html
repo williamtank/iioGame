@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>box2D IIO 2</title>
+	<script src="js/Box2dWeb-2.1.a.3.js"></script>
+	<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+</head>
+<body>
+	
+</body>
+<script>
+
+function B2BasicRendering(io) {
+   var   b2Vec2 = Box2D.Common.Math.b2Vec2
+      ,  b2AABB = Box2D.Collision.b2AABB
+      ,  b2BodyDef = Box2D.Dynamics.b2BodyDef
+      ,  b2Body = Box2D.Dynamics.b2Body
+      ,  b2FixtureDef = Box2D.Dynamics.b2FixtureDef
+      ,  b2Fixture = Box2D.Dynamics.b2Fixture
+      ,  b2World = Box2D.Dynamics.b2World
+      ,  b2PolygonShape = Box2D.Collision.Shapes.b2PolygonShape
+      ,  b2CircleShape = Box2D.Collision.Shapes.b2CircleShape
+      ,  b2MouseJointDef =  Box2D.Dynamics.Joints.b2MouseJointDef;
+
+    //封装了io和box2d create body直接的关系
+    function createB2dAndIO(bodyDef,fixDef){
+    	return io.addObj(world.CreateBody(bodyDef))
+                            .CreateFixture(fixDef)
+                            .GetShape()
+                            .prepGraphics(io.b2Scale);
+    }
+
+   var world = io.addB2World(new b2World(
+         new b2Vec2(0, 20)    //gravity
+      ,  true                 //allow sleep
+   ));
+   
+   var fixDef = new b2FixtureDef;
+   fixDef.density = 1.0;
+   fixDef.friction = 0.5;
+   fixDef.restitution = 0.2;
+   var bodyDef = new b2BodyDef;
+
+   //create ground
+   var sysFill = 'rgba(0,186,255,.4)';
+   var sysStrok = 'white';
+   bodyDef.type = b2Body.b2_staticBody;
+   fixDef.shape = new b2PolygonShape;
+   fixDef.shape.SetAsBox(15,.5);
+   bodyDef.position.Set(15,14.5);
+   createB2dAndIO(bodyDef,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+        
+   bodyDef.position.Set(15,0);
+   createB2dAndIO(bodyDef,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+
+   fixDef.shape.SetAsBox(.5,10);
+   bodyDef.position.Set(0,5);
+   createB2dAndIO(bodyDef,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+   bodyDef.position.Set(15,5);
+   createB2dAndIO(bodyDef,fixDef).setFillStyle(sysFill).setStrokeStyle(sysStrok);
+   
+   //create some objects
+   var shape,width,height;
+   bodyDef.type = b2Body.b2_dynamicBody;
+   for(var i = 0; i < 20; ++i) {
+      width = Math.random() + 0.1 //half width
+      height = Math.random() + 0.1 //half height
+      if(Math.random() > 0.5) {
+         fixDef.shape = new b2PolygonShape;
+         fixDef.shape.SetAsBox(width, height);
+      } else {
+         fixDef.shape = new b2CircleShape(width);
+      }
+      bodyDef.position.x = Math.random() * 13;
+      bodyDef.position.y = Math.random() * 10;
+      shape=io.addObj(world.CreateBody(bodyDef)).CreateFixture(fixDef).GetShape();
+      if (shape instanceof b2CircleShape)
+         shape.prepGraphics(io.b2Scale)
+              .setFillStyle(sysFill)
+              .setStrokeStyle(sysStrok)
+              .drawReferenceLine();
+      else
+         shape.prepGraphics(io.b2Scale)
+              .setFillStyle(sysFill)
+              .setStrokeStyle(sysStrok);
+   }
+
+   //Set the update loop
+   io.setB2Framerate(60, function(){
+      if(isMouseDown && (!mouseJoint)) {
+         var body = getB2BodyAt(mouseX,mouseY);
+         if(body) {
+            var md = new b2MouseJointDef();
+            md.bodyA = world.GetGroundBody();
+            md.bodyB = body;
+            md.target.Set(mouseX, mouseY);
+            md.collideConnected = true;
+            md.maxForce = 300.0 * body.GetMass();
+            //joint类不需要像body类和fixture类麻烦
+            mouseJoint = io.addObj(world.CreateJoint(md).prepGraphics().setStrokeStyle('white').setLineWidth(1));
+            body.SetAwake(true);
+         }
+      }
+      if(mouseJoint) {
+         if(isMouseDown) {
+            mouseJoint.SetTarget(new b2Vec2(mouseX, mouseY));
+         } else {
+            world.DestroyJoint(mouseJoint);
+            io.rmvObj(mouseJoint);
+            mouseJoint = null;
+         }
+      }
+   });
+
+   var mouseX, mouseY, mousePVec, isMouseDown, selectedBody, mouseJoint;
+   function getB2BodyAt(v,y) {
+      if (typeof v.x =='undefined')
+         v=new Box2D.Common.Math.b2Vec2(v,y);
+      mousePVec = new b2Vec2(mouseX, mouseY);
+      var aabb = new b2AABB();
+      aabb.lowerBound.Set(mouseX - 0.001, mouseY - 0.001);
+      aabb.upperBound.Set(mouseX + 0.001, mouseY + 0.001);
+      selectedBody = null;
+      //在world上在aabb范围内查找fixture(obj完全体)，查找到了调用getBodyCB方法
+      world.QueryAABB(getBodyCB, aabb);
+      return selectedBody;
+   }
+   function getBodyCB(fixture) {
+      if(fixture.GetBody().GetType() != b2Body.b2_staticBody) {
+         if(fixture.GetShape().TestPoint(fixture.GetBody().GetTransform(), mousePVec)) {
+            selectedBody = fixture.GetBody();
+            return false;
+         }
+      }
+      return true;
+   }
+
+   function mouseDown(e){
+      e.preventDefault();
+      isMouseDown = true;
+      mouseMove(e);
+   }
+   function mouseUp(e){
+      isMouseDown = false;
+      mouseX = undefined;
+      mouseY = undefined;
+   }
+   function mouseMove(e){
+   	  //iio与box2d的计量单位之间换算差值为30倍
+      mouseX = (io.getEventPosition(e).x) / 30;
+      mouseY = (io.getEventPosition(e).y) / 30;
+   }
+   io.setBGColor('#555');
+   io.canvas.addEventListener('mousedown', mouseDown);
+   io.canvas.addEventListener('mouseup', mouseUp);
+   io.canvas.addEventListener('mousemove', mouseMove);
+   //鼠标离开canvas还会触发的事件
+   this.focusOff = function(e){
+      mouseUp(e)
+   }
+}; iio.start(B2BasicRendering);
+</script>
+</html>

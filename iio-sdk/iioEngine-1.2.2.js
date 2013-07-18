@@ -1582,7 +1582,14 @@ var iio = {};
    function drawRect(ctx,pos,r){
       ctx=iio.Graphics.prepTransformedContext(ctx,this,pos,r);
       iio.Graphics.drawRectShadow(ctx,this);
-      if (!iio.Graphics.drawImage(ctx,this.img)){
+      //by bizai add flip horizontal for static img
+      if(this.flipImg){
+         //ctx.save();
+         ctx.translate(ctx.canvas.width, 0);
+         ctx.scale(-1, 1);
+         ctx.drawImage(this.img,ctx.canvas.width - this.width + this.width/2, -this.height/2,this.width, this.height);
+         //ctx.restore();
+      }else if (!iio.Graphics.drawImage(ctx,this.img)){
          ctx.drawImage(this.img, -this.width/2, -this.height/2, this.width, this.height);
          ctx.restore();
       }

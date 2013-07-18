@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>box2D IIO</title>
+	<script src="js/Box2dWeb-2.1.a.3.js"></script>
+	<script src="iio-sdk/iioEngine-1.2.2.js"></script>
+</head>
+<body>
+	
+</body>
+<script>
+
+function B2dDemo(io) {
+ 
+    //load necessary classes
+    var   b2Vec2 = Box2D.Common.Math.b2Vec2
+       ,  b2BodyDef = Box2D.Dynamics.b2BodyDef
+       ,  b2Body = Box2D.Dynamics.b2Body
+       ,  b2FixtureDef = Box2D.Dynamics.b2FixtureDef
+       ,  b2World = Box2D.Dynamics.b2World
+       ,  b2PolygonShape = Box2D.Collision.Shapes.b2PolygonShape
+       ,  b2CircleShape = Box2D.Collision.Shapes.b2CircleShape;
+ 
+    //create the box2d world
+    var world = io.addB2World(new b2World(
+        new b2Vec2(0, 10)    //gravity
+       ,true                 //allow sleep
+    ));
+   
+    //Define a fixture - used for all objects
+    var fixDef = new b2FixtureDef;
+    fixDef.density = 1.0;
+    fixDef.friction = 0.3;
+    fixDef.restitution = 0.5;
+    var bodyDef = new b2BodyDef;
+ 
+    //create ground
+    bodyDef.type = b2Body.b2_staticBody;
+    fixDef.shape = new b2PolygonShape;
+    //这样14-10=4 在左边会有个距离4cm的间距
+    fixDef.shape.SetAsBox(10,.5);  //设置墙的长为20cm，宽1cm
+    bodyDef.position.Set(14,17.2); 	//设置墙的中心在15cm,17.2cm处
+
+    //bodyDef和fixDef的关系 body create fixture
+	//var body = world.CreateBody(bodyDef);
+	//var fixture = body.CreateFixture(fixDef);
+	//如果是iio管理body和fixture关系的话如下
+	//After you create the object though, you must pass the new body object to your AppManager, so that it can render its fixture(s):
+	//var body = io.addObj(world.CreateBody(bodyDef));
+	//var fixture = body.CreateFixture(fixDef);
+	//fixture.GetShape().prepGraphics(io.b2Scale).setStrokeStyle('black', 2).addImage('path/image.png');
+	
+    var ground = io.addObj(world.CreateBody(bodyDef))
+    ground.CreateFixture(fixDef).GetShape().prepGraphics(io.b2Scale).setStrokeStyle('#000');
+ 
+    //create walls
+    //同理我们使用封装了上面的addObj再createFixture在getShape的关系，使用createB2IO方法，create我们的obj
+    fixDef.shape.SetAsBox(.5,14);
+    bodyDef.position.Set(2,13);
+    var wall1 = createB2IO(bodyDef,fixDef).setStrokeStyle('#000');
+    //world.CreateBody(bodyDef).CreateFixture(fixDef);
+    bodyDef.position.Set(12.2,13);
+    //world.CreateBody(bodyDef).CreateFixture(fixDef);
+    var wall2 = createB2IO(bodyDef,fixDef).setStrokeStyle('#000');
+ 
+ 
+    //define image paths
+    var imgPath = 'images/';
+ 
+    var blockImgs = [imgPath+'bonus.png'
+                    ,imgPath+'crate.png'
+                    ,imgPath+'block.png'
+                    ,imgPath+'lock_green.png'];
+ 
+    var coinImgs = [imgPath+'coin_gold.png'
+                   ,imgPath+'coin_silver.png'];
+ 
+    //create a block
+    function createBlock(y){
+      size = iio.getRandomNum(.3,1);
+      bodyDef.type = b2Body.b2_dynamicBody;
+      fixDef.shape = new b2PolygonShape;
+      fixDef.shape.SetAsBox(size, size);
+      prepShape(bodyDef, fixDef, y)
+       .addImage(blockImgs[iio.getRandomInt(0,blockImgs.length)]);
+    }
+ 
+    //create a sphere
+    function createSphere(y){
+      size = iio.getRandomNum(.3,1);
+      bodyDef.type = b2Body.b2_dynamicBody;
+      fixDef.shape = new b2CircleShape(size);
+      prepShape(bodyDef, fixDef, y)
+       .addImage(coinImgs[iio.getRandomInt(0,coinImgs.length)]);
+    }
+ 
+    //helper to set shape properties
+    function prepShape(bodyDef, fixDef, y){
+      bodyDef.position.x = Math.random() * 11;
+      bodyDef.position.y = Math.random() * y;
+      return io.addObj(world.CreateBody(bodyDef))
+                            .CreateFixture(fixDef)
+                            .GetShape()
+                            .prepGraphics(io.b2Scale);
+    }
+    //封装了io和box2d create body直接的关系
+    function createB2IO(bodyDef,fixDef){
+    	return io.addObj(world.CreateBody(bodyDef))
+                            .CreateFixture(fixDef)
+                            .GetShape()
+                            .prepGraphics(io.b2Scale);
+    }
+ 
+    //stop making shapes when they fill the
+    //entire canvas
+    var shapeCount=0;
+    var maxShapes=20;
+ 
+    //create 6 starting shapes
+    for (var i=0; i<3; i++){
+      createSphere(10);
+      createBlock(10);
+      shapeCount+=2;
+    }
+ 
+    //Set the update loop
+    io.setB2Framerate(60, function(){
+ 
+      //create new shapes randomly
+      if (shapeCount < maxShapes && Math.random()<.03){
+        if (Math.random()<.5)
+          createBlock(-10);
+        else 
+          createSphere(-10);
+        shapeCount++;
+      }
+    });
+ 
+};iio.start(B2dDemo);
+</script>
+</html>
